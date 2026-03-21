@@ -1,6 +1,3 @@
 {
-  "rewrites": [
-    { "source": "/api/yahoo", "destination": "/api/yahoo" },
-    { "source": "/api/ai", "destination": "/api/ai" }
-  ]
+  "framework": "vite"
 }

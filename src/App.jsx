@@ -10,29 +10,44 @@ function useWidth(){var s=useState(typeof window!=="undefined"?window.innerWidth
 function toYF(tk){if(CRTK.indexOf(tk)>-1)return tk+"-USD";if(tk==="BRK.B")return"BRK-B";return tk;}
 function fmtCap(v){if(!v)return"";if(v>=1e12)return(v/1e12).toFixed(1)+"T";if(v>=1e9)return(v/1e9).toFixed(1)+"B";return(v/1e6).toFixed(0)+"M";}
 var ETF_MAP={SPY:"Broad Market",VOO:"Broad Market",VTI:"Broad Market",IVV:"Broad Market",VT:"Broad Market",VXUS:"International",EFA:"International",EEM:"International",IEFA:"International",QQQ:"Technology",VGT:"Technology",XLK:"Technology",ARKK:"Technology",SMH:"Technology",SOXX:"Technology",VYM:"Dividend Equity",SCHD:"Dividend Equity",DVY:"Dividend Equity",HDV:"Dividend Equity",DGRO:"Dividend Equity",VIG:"Dividend Equity",XLE:"Energy",VDE:"Energy",XLF:"Financials",VFH:"Financials",XLV:"Healthcare",VHT:"Healthcare",XLI:"Industrials",XLP:"Consumer Staples",XLY:"Consumer Discretionary",XLU:"Utilities",XLRE:"Real Estate",VNQ:"Real Estate",XLB:"Materials",GLD:"Commodities",IAU:"Commodities",SLV:"Commodities",GDX:"Commodities",DBC:"Commodities",USO:"Commodities",BND:"Bonds",AGG:"Bonds",TLT:"Bonds",LQD:"Bonds",HYG:"Bonds",VCIT:"Bonds",IWM:"Broad Market",MDY:"Broad Market",DIA:"Broad Market",RSP:"Broad Market",VTWO:"Broad Market",VB:"Broad Market",IJR:"Broad Market"};
+function classifyTicker(tk,d){
+var isCr=CRTK.indexOf(tk)>-1;
+var sector=isCr?"Cryptocurrency":(d.sector||"");
+var aType=isCr?"Cryptocurrency":"Equity";
+if(!sector&&ETF_MAP[tk]){sector=ETF_MAP[tk];aType="ETF";}
+if(!sector&&d.companyName){var nm=(d.companyName||"").toLowerCase();if(nm.indexOf("etf")>-1||nm.indexOf("index")>-1||nm.indexOf("fund")>-1||nm.indexOf("trust")>-1||nm.indexOf("vanguard")>-1||nm.indexOf("ishares")>-1||nm.indexOf("spdr")>-1||nm.indexOf("schwab")>-1){sector="Broad Market";aType="ETF";}}
+return{currentPrice:d.currentPrice,companyName:d.companyName||tk,sector:sector,industry:d.industry||"",beta:d.beta||0,pe:d.pe||0,dividendYield:d.dividendYield||0,annualDividendPerShare:d.annualDividendPerShare||0,marketCap:d.marketCap||"",assetType:aType};
+}
 async function fetchTicker(tk){
 var sym=toYF(tk);
-var isCr=CRTK.indexOf(tk)>-1;
 try{
 var r=await fetch("/api/yahoo?symbol="+encodeURIComponent(sym),{signal:AbortSignal.timeout(15000)});
 if(!r.ok)return null;
 var d=await r.json();
 if(!d||d.error||!d.currentPrice||d.currentPrice<=0)return null;
-var sector=isCr?"Cryptocurrency":(d.sector||"");
-var aType=isCr?"Cryptocurrency":"Equity";
-if(!sector&&ETF_MAP[tk]){sector=ETF_MAP[tk];aType="ETF";}
-if(!sector&&d.companyName){var nm=(d.companyName||"").toLowerCase();if(nm.indexOf("etf")>-1||nm.indexOf("index")>-1||nm.indexOf("fund")>-1||nm.indexOf("trust")>-1||nm.indexOf("vanguard")>-1||nm.indexOf("ishares")>-1||nm.indexOf("spdr")>-1||nm.indexOf("schwab")>-1){sector="Broad Market";aType="ETF";}}
-return{currentPrice:d.currentPrice,companyName:d.companyName||sym,sector:sector,industry:d.industry||"",beta:d.beta||0,pe:d.pe||0,dividendYield:d.dividendYield||0,annualDividendPerShare:d.annualDividendPerShare||0,marketCap:d.marketCap||"",assetType:aType};
+return classifyTicker(tk,d);
 }catch(e){return null;}
 }
 async function fetchAllTickers(tickers,onProgress){
-var results={};var done=0;
-var chunks=[];for(var i=0;i<tickers.length;i+=3){chunks.push(tickers.slice(i,i+3));}
-for(var c=0;c<chunks.length;c++){
-var ps=chunks[c].map(function(tk){return fetchTicker(tk).then(function(d){if(d){results[tk]=d;done++;}}).catch(function(){});});
-await Promise.all(ps);
-if(onProgress)onProgress(done,tickers.length);
-if(c<chunks.length-1)await new Promise(function(r){setTimeout(r,300);});
+var syms=tickers.map(function(tk){return toYF(tk);});
+var results={};
+var BATCH=15;
+for(var b=0;b<syms.length;b+=BATCH){
+var chunkSyms=syms.slice(b,b+BATCH);
+var chunkTks=tickers.slice(b,b+BATCH);
+try{
+var url="/api/yahoo-batch?symbols="+encodeURIComponent(chunkSyms.join(","));
+var r=await fetch(url,{signal:AbortSignal.timeout(15000)});
+if(r.ok){
+var data=await r.json();
+for(var i=0;i<chunkTks.length;i++){
+var tk=chunkTks[i];var sym=chunkSyms[i];
+var d=data[sym];
+if(d&&d.currentPrice>0){results[tk]=classifyTicker(tk,d);}
+}
+}
+}catch(e){}
+if(onProgress)onProgress(Object.keys(results).length,tickers.length);
 }
 return Object.keys(results).length>0?results:null;
 }

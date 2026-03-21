@@ -44,25 +44,24 @@ var d=JSON.parse(txt);
 return(d.content||[]).filter(function(b){return b.type==="text";}).map(function(b){return b.text;}).join("")||"";
 }
 function parseJ(raw){var BT=String.fromCharCode(96);var c=raw;while(c.indexOf(BT)>-1)c=c.replace(BT,"");c=c.trim();var a2=c.indexOf("{"),b2=c.lastIndexOf("}"),a=c.indexOf("["),b=c.lastIndexOf("]");if(a>-1&&b>a)return JSON.parse(c.slice(a,b+1));if(a2>-1&&b2>a2)return JSON.parse(c.slice(a2,b2+1));throw new Error("No JSON");}
-async function enrichWithAI(tickers){
+async function fetchYahooDetails(tk){
+var sym=toYF(tk);
 try{
-var raw=await callAI([{role:"user",content:"For these tickers give sector, beta, dividendYield (%), annualDividendPerShare, pe, marketCap. Tickers: "+tickers.join(",")+". JSON only: {\"TICK\":{sector:\"X\",beta:1.0,dividendYield:0,annualDividendPerShare:0,pe:0,marketCap:\"XB\"}}"}],"Return only valid JSON object. No markdown.",2048);
-return parseJ(raw);
-}catch(e){return{};}
+var r=await fetch("/api/yahoo-details?symbol="+encodeURIComponent(sym),{signal:AbortSignal.timeout(10000)});
+if(!r.ok)return null;
+var d=await r.json();
+return d&&d.sector?d:null;
+}catch(e){return null;}
 }
-async function fetchPricesAIBatch(tickers){
-var results={};
-for(var i=0;i<tickers.length;i+=4){
-var chunk=tickers.slice(i,i+4);
-var isCrs=chunk.map(function(tk){return CRTK.indexOf(tk)>-1;});
-var prompt=chunk.map(function(tk,j){return'"'+tk+'":{currentPrice:0,dividendYield:0,annualDividendPerShare:0,sector:"",assetType:'+(isCrs[j]?'"Cryptocurrency"':'"Equity"')+',beta:0,companyName:"",marketCap:"",pe:0}';}).join(",");
-try{
-var raw=await callAI([{role:"user",content:"Real current market prices. Return JSON: {"+prompt+"}"}],"Valid JSON only. No markdown. Fill in real values.",1500);
-var parsed=parseJ(raw);
-Object.assign(results,parsed);
-}catch(e){}
+async function enrichWithYahoo(tickers,onProgress){
+var results={};var done=0;
+var chunks=[];for(var i=0;i<tickers.length;i+=6){chunks.push(tickers.slice(i,i+6));}
+for(var c=0;c<chunks.length;c++){
+var ps=chunks[c].map(function(tk){return fetchYahooDetails(tk).then(function(d){if(d){results[tk]=d;done++;}}).catch(function(){});});
+await Promise.all(ps);
+if(onProgress)onProgress(done,tickers.length);
 }
-return Object.keys(results).length>0?results:null;
+return results;
 }
 
 
@@ -243,46 +242,28 @@ return ins;
 var wheelT=useCallback(function(e){e.preventDefault();var len=pieDataT.length;if(!len)return;hap();setActiveT(function(prev){return prev===null?0:e.deltaY>0?(prev+1)%len:(prev-1+len)%len;});},[pieDataT.length]);
 var wheelS=useCallback(function(e){e.preventDefault();var len=pieDataS.length;if(!len)return;hap();setActiveS(function(prev){return prev===null?0:e.deltaY>0?(prev+1)%len:(prev-1+len)%len;});},[pieDataS.length]);
 var startTimer=function(){var start=Date.now();clearInterval(timerRef.current);timerRef.current=setInterval(function(){var s=((Date.now()-start)/1000).toFixed(1);setStatus(function(prev){if(!prev){clearInterval(timerRef.current);return"";}var pi=prev.indexOf(String.fromCharCode(32,40));return pi>-1?prev.slice(0,pi):prev+" ("+s+"s)";});},100);};
-var liveOne=useCallback(async function(tk){setFetching(function(f){var n=Object.assign({},f);n[tk]=true;return n;});try{var yData=await fetchYahooQuote(tk);if(yData){var aiData=await enrichWithAI([tk]);var merged=Object.assign({},aiData[tk]||{},yData);var obj={};obj[tk]=merged;setEnriched(function(prev){return Object.assign({},prev,obj);});}else{var aiAll=await fetchPricesAIBatch([tk]);if(aiAll)setEnriched(function(prev){return Object.assign({},prev,aiAll);});}}catch(e){}setFetching(function(f){var n=Object.assign({},f);delete n[tk];return n;});},[]);
+var liveOne=useCallback(async function(tk){setFetching(function(f){var n=Object.assign({},f);n[tk]=true;return n;});try{var yData=await fetchYahooQuote(tk);var details=await fetchYahooDetails(tk);if(yData){var obj={};obj[tk]=Object.assign({},details||{},yData);setEnriched(function(prev){return Object.assign({},prev,obj);});}}catch(e){}setFetching(function(f){var n=Object.assign({},f);delete n[tk];return n;});},[]);
 var loadAll=useCallback(async function(){
 if(!validH.length)return;
 setLoading({fetch:true});setErr("");
 var tickers=Array.from(new Set(validH.map(function(x){return cT(x.ticker);})));
 setStatus("Fetching prices from Yahoo Finance...");
 try{
-var yData=await fetchYahooBatch(tickers,function(done,total){setStatus("Yahoo Finance: "+done+"/"+total+" loaded...");});
+var yData=await fetchYahooBatch(tickers,function(done,total){setStatus("Prices: "+done+"/"+total+"...");});
 if(yData){
-var yCount=Object.keys(yData).length;
-setStatus("Got "+yCount+" prices. Enriching with AI...");
-var aiData=await enrichWithAI(tickers);
+setStatus("Loading sector & fundamentals...");
+var details=await enrichWithYahoo(tickers,function(done,total){setStatus("Details: "+done+"/"+total+"...");});
 var merged={};
 tickers.forEach(function(tk){
-var y=yData[tk]||{};var a=aiData[tk]||{};
-merged[tk]=Object.assign({},a,y);
-if(a.sector&&!y.sector)merged[tk].sector=a.sector;
-if(a.beta)merged[tk].beta=a.beta;
-if(a.dividendYield)merged[tk].dividendYield=a.dividendYield;
-if(a.annualDividendPerShare)merged[tk].annualDividendPerShare=a.annualDividendPerShare;
-if(a.pe)merged[tk].pe=a.pe;
-if(a.marketCap)merged[tk].marketCap=a.marketCap;
+var y=yData[tk]||{};var d=details[tk]||{};
+var isCr=CRTK.indexOf(tk)>-1;
+merged[tk]=Object.assign({},d,y);
+if(isCr){merged[tk].sector="Cryptocurrency";merged[tk].assetType="Cryptocurrency";}
 });
 setEnriched(function(prev){return Object.assign({},prev,merged);});
-var missing=tickers.filter(function(tk){return!yData[tk];});
-if(missing.length>0){
-setStatus("AI fallback for "+missing.length+" tickers...");
-var fallback=await fetchPricesAIBatch(missing);
-if(fallback)setEnriched(function(prev){return Object.assign({},prev,fallback);});
-}
-setStatus("Done: "+tickers.length+" tickers loaded");
+setStatus("Done: "+Object.keys(yData).length+" tickers loaded");
 }else{
-setStatus("Yahoo unavailable. Using AI fallback...");
-var aiAll=await fetchPricesAIBatch(tickers);
-if(aiAll){
-var aiEnrich=await enrichWithAI(tickers);
-var merged2={};tickers.forEach(function(tk){merged2[tk]=Object.assign({},aiEnrich[tk]||{},aiAll[tk]||{});});
-setEnriched(function(prev){return Object.assign({},prev,merged2);});
-setStatus("Done: "+Object.keys(aiAll).length+" loaded via AI");
-}else{setErr("Failed to load prices from Yahoo or AI");}
+setErr("Failed to load prices from Yahoo Finance");
 }
 }catch(e){setErr(e.message);}
 setTimeout(function(){setStatus("");},4000);

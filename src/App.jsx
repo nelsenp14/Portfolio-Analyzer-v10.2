@@ -119,7 +119,7 @@ var fT0=S(null),filterTicker=fT0[0],setFilterTicker=fT0[1],fS0=S(null),filterSec
 var so0=S(null),sortCol=so0[0],setSortCol=so0[1],sD0=S("desc"),sortDir=sD0[0],setSortDir=sD0[1];
 var cO0=S(true),chartsOpen=cO0[0],setChartsOpen=cO0[1],gm0=S("pct"),glMode=gm0[0],setGlMode=gm0[1],dm0=S("pct"),divMode=dm0[0],setDivMode=dm0[1];
 var chatEndRef=useRef(null),nid=useRef(8),loaded=useRef(false),timerRef=useRef(null);
-useEffect(function(){if(loaded.current)return;loaded.current=true;sList("pf:").then(function(keys){if(!keys||!keys.length)return;Promise.all(keys.map(function(k){return sLoad(k).then(function(d){return d?Object.assign({},d,{key:k}):null;});})).then(function(r){setSavedList(r.filter(Boolean).sort(function(a,b){return(b.savedAt||0)-(a.savedAt||0);}));});});sLoad("pf-active").then(function(data){if(data&&data.holdings&&data.holdings.length>0){setHoldings(data.holdings);nid.current=Math.max.apply(null,data.holdings.map(function(x){return x.id;}))+1;}});},[]);
+useEffect(function(){if(loaded.current)return;loaded.current=true;sList("pf:").then(function(keys){if(!keys||!keys.length)return;Promise.all(keys.map(function(k){return sLoad(k).then(function(d){return d?Object.assign({},d,{key:k}):null;});})).then(function(r){setSavedList(r.filter(Boolean).sort(function(a,b){return(b.savedAt||0)-(a.savedAt||0);}));});});sLoad("pf-active").then(function(data){if(data&&data.holdings&&data.holdings.length>0){var valid=data.holdings.filter(function(x){return x.ticker&&x.ticker.trim();});if(valid.length>0){setHoldings(data.holdings);nid.current=Math.max.apply(null,data.holdings.map(function(x){return x.id;}))+1;}}});},[]);
 useEffect(function(){if(chatEndRef.current)chatEndRef.current.scrollIntoView({behavior:"smooth"});},[chatMsgs]);
 useEffect(function(){if(loaded.current)sSave("pf-active",{holdings:holdings});},[holdings]);
 var validH=holdings.filter(function(x){return x.ticker.trim()&&parseFloat(x.shares)>0&&parseFloat(x.avgCost)>0;});
@@ -333,23 +333,6 @@ return (<div style={{fontFamily:"Poppins,sans-serif",background:"#0a0e1a",minHei
 <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"1fr 2fr",gap:14,marginBottom:14}}><div style={Object.assign({},cd,{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,padding:24})}><div style={{fontSize:12,color:"#94a3b8",fontWeight:600}}>Risk Appetite</div><div style={{fontSize:mob?48:60,fontWeight:700,color:scColor,lineHeight:1}}>{sc.total.toFixed(1)}</div><div style={{fontSize:11,color:"#64748b"}}>/100 higher = riskier</div><span style={tgF(scColor+"22",scColor)}>{scLabel}</span></div>
 <div style={cd}><div style={ttl}>Score Breakdown</div><div style={{marginTop:14}}>{[{l:"Beta",s:sc.s1,d:"="+sc.wb.toFixed(2)},{l:"Concentration",s:sc.s2,d:"Top3="+(sc.top3*100).toFixed(1)+"%"},{l:"Crypto",s:sc.s3,d:(sc.crypto*100).toFixed(1)+"%"},{l:"Diversification",s:sc.s4,d:sc.n+" pos"},{l:"VaR",s:sc.s5,d:"99%"},{l:"Tech/Growth",s:sc.s6,d:(sc.techPct*100).toFixed(1)+"%"}].map(function(f){return <div key={f.l} style={{marginBottom:12}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:"#cbd5e1"}}>{f.l}</span><span style={{fontSize:11,color:"#fff",fontWeight:600}}>{f.s.toFixed(1)}/{f.mx||20} <span style={{color:"#64748b"}}>{f.d}</span></span></div><div style={{height:6,background:"#1e293b",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:(f.s/20*100)+"%",background:f.s<7?"#22c55e":f.s<14?"#f59e0b":"#ef4444",borderRadius:3}}/></div></div>;})}</div></div></div>
 <div style={{display:"grid",gridTemplateColumns:gCols,gap:10,marginBottom:14}}>{[{l:"Beta",v:sc.wb.toFixed(2),c:sc.wb>1.3?"#f59e0b":"#22c55e"},{l:"Top 3",v:(sc.top3*100).toFixed(1)+"%",c:sc.top3>0.5?"#f59e0b":"#22c55e"},{l:"Crypto",v:(sc.crypto*100).toFixed(1)+"%",c:sc.crypto>0.2?"#ef4444":"#22c55e"},{l:"Positions",v:sc.n,c:sc.n<10?"#f59e0b":"#22c55e"},{l:"Div Income",v:fmt(Math.round(tv*dy/100))+"/yr",c:"#a78bfa"}].map(function(m){return <div key={m.l} style={sCard}><div style={lbl}>{m.l}</div><div style={vlS(m.c)}>{m.v}</div></div>;})}</div>
-{riskIns.length>0&&<div>
-<div style={Object.assign({},cd,{marginBottom:14})}><div style={ttl}>Sector Risk Analysis</div><div style={{fontSize:11,color:"#64748b",marginTop:2,marginBottom:14}}>Risk assessment by sector with macro context and actionable suggestions</div>
-{riskIns.filter(function(ins){return ins.title.indexOf("Macro")===-1;}).map(function(ins,i){var ac2=ins.type==="danger"?"#ef4444":ins.type==="warning"?"#f59e0b":ins.type==="neutral"?"#3b82f6":"#22c55e";return <div key={i} style={{padding:"16px 18px",borderRadius:10,marginBottom:12,background:"#0a0e1a",border:"1px solid #1e293b",borderLeft:"4px solid "+ac2}}>
-<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:"50%",background:ac2,boxShadow:"0 0 8px "+ac2+"66",flexShrink:0}}/><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{ins.title}</div></div><span style={{fontSize:9,fontWeight:600,padding:"3px 8px",borderRadius:4,background:ac2+"22",color:ac2,textTransform:"uppercase"}}>{ins.type==="danger"?"HIGH RISK":ins.type==="warning"?"MODERATE RISK":ins.type==="neutral"?"MONITOR":"LOW RISK"}</span></div>
-<div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.8,marginBottom:10}}>{ins.text}</div>
-{ins.suggestion&&<div style={{fontSize:12,color:"#94a3b8",lineHeight:1.7,padding:"10px 14px",background:"rgba(59,130,246,0.06)",borderRadius:8,border:"1px solid rgba(59,130,246,0.15)"}}><span style={{color:"#60a5fa",fontWeight:700,marginRight:6}}>ACTION:</span>{ins.suggestion}</div>}
-</div>;})}
-</div>
-<div style={Object.assign({},cd,{marginBottom:14})}><div style={ttl}>Macroeconomic Risk Factors</div><div style={{fontSize:11,color:"#64748b",marginTop:2,marginBottom:14}}>External forces that could impact your portfolio</div>
-{riskIns.filter(function(ins){return ins.title.indexOf("Macro")>-1;}).map(function(ins,i){return <div key={i} style={{padding:"16px 18px",borderRadius:10,marginBottom:12,background:"#0a0e1a",border:"1px solid #1e293b",borderLeft:"4px solid #3b82f6"}}>
-<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{ins.title.replace("Macro: ","")}</div></div>
-<div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.8,marginBottom:10}}>{ins.text}</div>
-{ins.suggestion&&<div style={{fontSize:12,color:"#94a3b8",lineHeight:1.7,padding:"10px 14px",background:"rgba(59,130,246,0.06)",borderRadius:8,border:"1px solid rgba(59,130,246,0.15)"}}><span style={{color:"#60a5fa",fontWeight:700,marginRight:6}}>STRATEGY:</span>{ins.suggestion}</div>}
-</div>;})}
-</div>
-</div>}
-</div>}
 <div style={Object.assign({},cd,{marginBottom:14})}><div style={ttl}>Scenario Analysis</div><div style={{fontSize:11,color:"#64748b",marginTop:2,marginBottom:14}}>What happens to your portfolio under these macro scenarios</div>
 <div style={{display:"grid",gridTemplateColumns:mob?"1fr":"repeat(2,1fr)",gap:12}}>
 {[
@@ -367,7 +350,25 @@ return (<div style={{fontFamily:"Poppins,sans-serif",background:"#0a0e1a",minHei
 <div style={{fontSize:11,color:"#64748b",marginBottom:8,lineHeight:1.6}}>{s.desc}</div>
 <div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.8}}>{s.effects}</div>
 </div>;})}
-</div></div>{tabFooter}</div>}
+</div></div>
+{riskIns.length>0&&<div>
+<div style={Object.assign({},cd,{marginBottom:14})}><div style={ttl}>Sector Risk Analysis</div><div style={{fontSize:11,color:"#64748b",marginTop:2,marginBottom:14}}>Risk assessment by sector with macro context and actionable suggestions</div>
+{riskIns.filter(function(ins){return ins.title.indexOf("Macro")===-1;}).map(function(ins,i){var ac2=ins.type==="danger"?"#ef4444":ins.type==="warning"?"#f59e0b":ins.type==="neutral"?"#3b82f6":"#22c55e";return <div key={i} style={{padding:"16px 18px",borderRadius:10,marginBottom:12,background:"#0a0e1a",border:"1px solid #1e293b",borderLeft:"4px solid "+ac2}}>
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:"50%",background:ac2,boxShadow:"0 0 8px "+ac2+"66",flexShrink:0}}/><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{ins.title}</div></div><span style={{fontSize:9,fontWeight:600,padding:"3px 8px",borderRadius:4,background:ac2+"22",color:ac2,textTransform:"uppercase"}}>{ins.type==="danger"?"HIGH RISK":ins.type==="warning"?"MODERATE RISK":ins.type==="neutral"?"MONITOR":"LOW RISK"}</span></div>
+<div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.8,marginBottom:10}}>{ins.text}</div>
+{ins.suggestion&&<div style={{fontSize:12,color:"#94a3b8",lineHeight:1.7,padding:"10px 14px",background:"rgba(59,130,246,0.06)",borderRadius:8,border:"1px solid rgba(59,130,246,0.15)"}}><span style={{color:"#60a5fa",fontWeight:700,marginRight:6}}>ACTION:</span>{ins.suggestion}</div>}
+</div>;})}
+</div>
+<div style={Object.assign({},cd,{marginBottom:14})}><div style={ttl}>Macroeconomic Risk Factors</div><div style={{fontSize:11,color:"#64748b",marginTop:2,marginBottom:14}}>External forces that could impact your portfolio</div>
+{riskIns.filter(function(ins){return ins.title.indexOf("Macro")>-1;}).map(function(ins,i){return <div key={i} style={{padding:"16px 18px",borderRadius:10,marginBottom:12,background:"#0a0e1a",border:"1px solid #1e293b",borderLeft:"4px solid #3b82f6"}}>
+<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg><div style={{fontSize:14,fontWeight:700,color:"#fff"}}>{ins.title.replace("Macro: ","")}</div></div>
+<div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.8,marginBottom:10}}>{ins.text}</div>
+{ins.suggestion&&<div style={{fontSize:12,color:"#94a3b8",lineHeight:1.7,padding:"10px 14px",background:"rgba(59,130,246,0.06)",borderRadius:8,border:"1px solid rgba(59,130,246,0.15)"}}><span style={{color:"#60a5fa",fontWeight:700,marginRight:6}}>STRATEGY:</span>{ins.suggestion}</div>}
+</div>;})}
+</div>
+</div>}
+</div>}
+{tabFooter}</div>}
 {/* AI ADVICE TAB */}
 {tab==="recommendations"&&<div><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><div style={ttl}>AI Recommendations</div><button style={bS(!loading.recs&&hasData)} disabled={loading.recs||!hasData} onClick={genRecs}>{loading.recs?"Analyzing...":"Generate"}</button></div>
 {!recs?<div style={Object.assign({},cd,{textAlign:"center",padding:48,color:"#64748b"})}>{hasData?"Click Generate":"Load first"}</div>:<div style={{display:"grid",gap:14}}>

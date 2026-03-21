@@ -79,12 +79,11 @@ module.exports = async function handler(req, res) {
               var divRate = (detail.dividendRate && detail.dividendRate.raw) || 0;
               if (!divRate && detail.trailingAnnualDividendRate && detail.trailingAnnualDividendRate.raw) divRate = detail.trailingAnnualDividendRate.raw;
               item.annualDividendPerShare = divRate;
-              var lastDiv = (detail.lastDividendValue && detail.lastDividendValue.raw) || 0;
-              if (lastDiv > 0 && divRate > 0) {
-                var freq = Math.round(divRate / lastDiv);
-                item.divFrequency = freq;
-                item.lastDividendValue = lastDiv;
-              }
+              
+              // Return raw lastDividendValue for frontend frequency detection
+              var lastDiv = (detail.lastDividendValue && detail.lastDividendValue.raw) || 
+                           (stats.lastDividendValue && stats.lastDividendValue.raw) || 0;
+              if (lastDiv > 0) item.lastDividendValue = lastDiv;
               var mc = (detail.marketCap && detail.marketCap.raw) || 0;
               item.marketCap = mc >= 1e12 ? (mc/1e12).toFixed(1)+"T" : mc >= 1e9 ? (mc/1e9).toFixed(1)+"B" : mc > 0 ? (mc/1e6).toFixed(0)+"M" : "";
               var cal = qr.calendarEvents || {};

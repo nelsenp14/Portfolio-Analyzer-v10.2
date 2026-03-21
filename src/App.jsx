@@ -260,8 +260,9 @@ var raw=await callAI([{role:"user",content:[{type:"image",source:{type:"base64",
 var parsed=parseJ(raw);
 if(parsed&&parsed.length>0){
 var newH=parsed.map(function(p){return{id:nid.current++,ticker:(p.ticker||"").toUpperCase(),shares:String(p.shares||"0"),avgCost:String(p.avgCost||"0")};}).filter(function(h){return h.ticker;});
-setHoldings(function(prev){return prev.concat(newH);});
-setStatus("Added "+newH.length+" positions from screenshot");
+setHoldings(newH);
+setEnriched({});
+setStatus("Loaded "+newH.length+" positions from screenshot");
 }else{setErr("Could not find any holdings in the screenshot");}
 }catch(e2){setErr("Screenshot scan failed: "+e2.message);}
 setTimeout(function(){setStatus("");},4000);

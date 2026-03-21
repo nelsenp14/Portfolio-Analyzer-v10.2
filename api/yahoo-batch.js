@@ -46,6 +46,7 @@ module.exports = async function handler(req, res) {
 
         var item = {
           currentPrice: meta.regularMarketPrice,
+          previousClose: meta.chartPreviousClose || meta.previousClose || 0,
           companyName: meta.shortName || meta.longName || sym,
           sector: "", industry: "", beta: 0, pe: 0,
           dividendYield: 0, annualDividendPerShare: 0, marketCap: ""

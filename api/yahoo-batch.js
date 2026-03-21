@@ -68,10 +68,16 @@ module.exports = async function handler(req, res) {
               var stats = qr.defaultKeyStatistics || {};
               item.sector = profile.sector || "";
               item.industry = profile.industry || "";
-              item.beta = (stats.beta && stats.beta.raw) || 0;
+              item.beta = (stats.beta && stats.beta.raw) || (detail.beta3Year && detail.beta3Year.raw) || 0;
               item.pe = (detail.trailingPE && detail.trailingPE.raw) || 0;
-              item.dividendYield = (detail.dividendYield && detail.dividendYield.raw) ? detail.dividendYield.raw * 100 : 0;
-              item.annualDividendPerShare = (detail.dividendRate && detail.dividendRate.raw) || 0;
+              var dy = (detail.dividendYield && detail.dividendYield.raw) ? detail.dividendYield.raw * 100 : 0;
+              if (!dy && detail.yield && detail.yield.raw) dy = detail.yield.raw * 100;
+              if (!dy && detail.trailingAnnualDividendYield && detail.trailingAnnualDividendYield.raw) dy = detail.trailingAnnualDividendYield.raw * 100;
+              if (!dy && stats.yield && stats.yield.raw) dy = stats.yield.raw * 100;
+              item.dividendYield = dy;
+              var divRate = (detail.dividendRate && detail.dividendRate.raw) || 0;
+              if (!divRate && detail.trailingAnnualDividendRate && detail.trailingAnnualDividendRate.raw) divRate = detail.trailingAnnualDividendRate.raw;
+              item.annualDividendPerShare = divRate;
               var mc = (detail.marketCap && detail.marketCap.raw) || 0;
               item.marketCap = mc >= 1e12 ? (mc/1e12).toFixed(1)+"T" : mc >= 1e9 ? (mc/1e9).toFixed(1)+"B" : mc > 0 ? (mc/1e6).toFixed(0)+"M" : "";
             }

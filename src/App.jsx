@@ -13,20 +13,21 @@ async function fetchTicker(tk){
 var sym=toYF(tk);
 var isCr=CRTK.indexOf(tk)>-1;
 try{
-var r=await fetch("/api/yahoo?symbol="+encodeURIComponent(sym)+"&full=1",{signal:AbortSignal.timeout(12000)});
+var r=await fetch("/api/yahoo?symbol="+encodeURIComponent(sym),{signal:AbortSignal.timeout(15000)});
 if(!r.ok)return null;
 var d=await r.json();
-if(!d||!d.currentPrice||d.currentPrice<=0)return null;
+if(!d||d.error||!d.currentPrice||d.currentPrice<=0)return null;
 return{currentPrice:d.currentPrice,companyName:d.companyName||sym,sector:isCr?"Cryptocurrency":(d.sector||""),industry:d.industry||"",beta:d.beta||0,pe:d.pe||0,dividendYield:d.dividendYield||0,annualDividendPerShare:d.annualDividendPerShare||0,marketCap:d.marketCap||"",assetType:isCr?"Cryptocurrency":"Equity"};
 }catch(e){return null;}
 }
 async function fetchAllTickers(tickers,onProgress){
 var results={};var done=0;
-var chunks=[];for(var i=0;i<tickers.length;i+=4){chunks.push(tickers.slice(i,i+4));}
+var chunks=[];for(var i=0;i<tickers.length;i+=3){chunks.push(tickers.slice(i,i+3));}
 for(var c=0;c<chunks.length;c++){
 var ps=chunks[c].map(function(tk){return fetchTicker(tk).then(function(d){if(d){results[tk]=d;done++;}}).catch(function(){});});
 await Promise.all(ps);
 if(onProgress)onProgress(done,tickers.length);
+if(c<chunks.length-1)await new Promise(function(r){setTimeout(r,300);});
 }
 return Object.keys(results).length>0?results:null;
 }
@@ -228,13 +229,15 @@ setStatus("Loading from Yahoo Finance...");
 try{
 var data=await fetchAllTickers(tickers,function(done,total){setStatus("Loading: "+done+"/"+total+" tickers...");});
 if(data){
+var loaded=Object.keys(data).length;
 setEnriched(function(prev){return Object.assign({},prev,data);});
-setStatus("Done: "+Object.keys(data).length+" tickers loaded");
+var missing=tickers.filter(function(tk){return!data[tk];});
+setStatus("Done: "+loaded+" loaded"+(missing.length>0?", missed: "+missing.join(", "):""));
 }else{
-setErr("Failed to load prices from Yahoo Finance");
+setErr("Yahoo Finance returned no data. Please try again.");
 }
-}catch(e){setErr(e.message);}
-setTimeout(function(){setStatus("");},4000);
+}catch(e){setErr("Error: "+e.message);}
+setTimeout(function(){setStatus("");},5000);
 setLoading({});
 },[validH]);
 var doSave=useCallback(async function(){var name=saveName.trim()||("Portfolio "+new Date().toLocaleDateString());var key="pf:"+Date.now();await sSave(key,{name:name,holdings:holdings,savedAt:Date.now()});setSavedList(function(prev){return[{name:name,holdings:holdings,savedAt:Date.now(),key:key}].concat(prev);});setSaveName("");setShowSavePanel(false);},[saveName,holdings]);

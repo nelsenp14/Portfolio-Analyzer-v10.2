@@ -9,31 +9,29 @@ function fmt(v){return"$"+v.toLocaleString("en-US");}
 function useWidth(){var s=useState(typeof window!=="undefined"?window.innerWidth:1200);useEffect(function(){function h(){s[1](window.innerWidth);}window.addEventListener("resize",h);return function(){window.removeEventListener("resize",h);};},[]);return s[0];}
 function toYF(tk){if(CRTK.indexOf(tk)>-1)return tk+"-USD";if(tk==="BRK.B")return"BRK-B";return tk;}
 function fmtCap(v){if(!v)return"";if(v>=1e12)return(v/1e12).toFixed(1)+"T";if(v>=1e9)return(v/1e9).toFixed(1)+"B";return(v/1e6).toFixed(0)+"M";}
-async function fetchYahooQuote(tk){
+async function fetchTicker(tk){
 var sym=toYF(tk);
-var url="/api/yahoo?symbol="+encodeURIComponent(sym);
+var isCr=CRTK.indexOf(tk)>-1;
 try{
-var r=await fetch(url,{signal:AbortSignal.timeout(10000)});
+var r=await fetch("/api/yahoo?symbol="+encodeURIComponent(sym)+"&full=1",{signal:AbortSignal.timeout(12000)});
 if(!r.ok)return null;
 var d=await r.json();
-var res=d&&d.chart&&d.chart.result&&d.chart.result[0];
-if(!res||!res.meta)return null;
-var m=res.meta;
-if(!m.regularMarketPrice||m.regularMarketPrice<=0)return null;
-var isCr=CRTK.indexOf(tk)>-1;
-return{currentPrice:m.regularMarketPrice,companyName:m.shortName||m.longName||sym,assetType:isCr?"Cryptocurrency":"Equity",sector:isCr?"Cryptocurrency":"",beta:0,dividendYield:0,annualDividendPerShare:0,pe:0,marketCap:""};
+if(!d||!d.currentPrice||d.currentPrice<=0)return null;
+return{currentPrice:d.currentPrice,companyName:d.companyName||sym,sector:isCr?"Cryptocurrency":(d.sector||""),industry:d.industry||"",beta:d.beta||0,pe:d.pe||0,dividendYield:d.dividendYield||0,annualDividendPerShare:d.annualDividendPerShare||0,marketCap:d.marketCap||"",assetType:isCr?"Cryptocurrency":"Equity"};
 }catch(e){return null;}
 }
-async function fetchYahooBatch(tickers,onProgress){
+async function fetchAllTickers(tickers,onProgress){
 var results={};var done=0;
-var chunks=[];for(var i=0;i<tickers.length;i+=6){chunks.push(tickers.slice(i,i+6));}
+var chunks=[];for(var i=0;i<tickers.length;i+=4){chunks.push(tickers.slice(i,i+4));}
 for(var c=0;c<chunks.length;c++){
-var ps=chunks[c].map(function(tk){return fetchYahooQuote(tk).then(function(d){if(d){results[tk]=d;done++;}}).catch(function(){});});
+var ps=chunks[c].map(function(tk){return fetchTicker(tk).then(function(d){if(d){results[tk]=d;done++;}}).catch(function(){});});
 await Promise.all(ps);
 if(onProgress)onProgress(done,tickers.length);
 }
 return Object.keys(results).length>0?results:null;
 }
+
+
 async function callAI(m,sys,mt){
 var body={model:"claude-sonnet-4-20250514",max_tokens:mt||800,messages:m};
 if(sys)body.system=sys;
@@ -44,27 +42,6 @@ var d=JSON.parse(txt);
 return(d.content||[]).filter(function(b){return b.type==="text";}).map(function(b){return b.text;}).join("")||"";
 }
 function parseJ(raw){var BT=String.fromCharCode(96);var c=raw;while(c.indexOf(BT)>-1)c=c.replace(BT,"");c=c.trim();var a2=c.indexOf("{"),b2=c.lastIndexOf("}"),a=c.indexOf("["),b=c.lastIndexOf("]");if(a>-1&&b>a)return JSON.parse(c.slice(a,b+1));if(a2>-1&&b2>a2)return JSON.parse(c.slice(a2,b2+1));throw new Error("No JSON");}
-async function fetchYahooDetails(tk){
-var sym=toYF(tk);
-try{
-var r=await fetch("/api/yahoo-details?symbol="+encodeURIComponent(sym),{signal:AbortSignal.timeout(10000)});
-if(!r.ok)return null;
-var d=await r.json();
-return d&&d.sector?d:null;
-}catch(e){return null;}
-}
-async function enrichWithYahoo(tickers,onProgress){
-var results={};var done=0;
-var chunks=[];for(var i=0;i<tickers.length;i+=6){chunks.push(tickers.slice(i,i+6));}
-for(var c=0;c<chunks.length;c++){
-var ps=chunks[c].map(function(tk){return fetchYahooDetails(tk).then(function(d){if(d){results[tk]=d;done++;}}).catch(function(){});});
-await Promise.all(ps);
-if(onProgress)onProgress(done,tickers.length);
-}
-return results;
-}
-
-
 var AC={BUY:"#22c55e",ADD:"#22c55e",HOLD:"#64748b",TRIM:"#f59e0b",SELL:"#ef4444"};
 var CRTK=["BTC","ETH","SOL","DOGE","ADA","XRP","DOT","AVAX","MATIC","LINK","UNI","SHIB","LTC","BNB"];
 var CLR=["#3b82f6","#f59e0b","#22c55e","#ec4899","#06b6d4","#ef4444","#a78bfa","#f97316","#14b8a6","#fb7185","#8b5cf6","#34d399","#60a5fa","#fbbf24","#c084fc","#fb923c","#4ade80","#38bdf8","#f472b6","#a3e635"];
@@ -242,26 +219,17 @@ return ins;
 var wheelT=useCallback(function(e){e.preventDefault();var len=pieDataT.length;if(!len)return;hap();setActiveT(function(prev){return prev===null?0:e.deltaY>0?(prev+1)%len:(prev-1+len)%len;});},[pieDataT.length]);
 var wheelS=useCallback(function(e){e.preventDefault();var len=pieDataS.length;if(!len)return;hap();setActiveS(function(prev){return prev===null?0:e.deltaY>0?(prev+1)%len:(prev-1+len)%len;});},[pieDataS.length]);
 var startTimer=function(){var start=Date.now();clearInterval(timerRef.current);timerRef.current=setInterval(function(){var s=((Date.now()-start)/1000).toFixed(1);setStatus(function(prev){if(!prev){clearInterval(timerRef.current);return"";}var pi=prev.indexOf(String.fromCharCode(32,40));return pi>-1?prev.slice(0,pi):prev+" ("+s+"s)";});},100);};
-var liveOne=useCallback(async function(tk){setFetching(function(f){var n=Object.assign({},f);n[tk]=true;return n;});try{var yData=await fetchYahooQuote(tk);var details=await fetchYahooDetails(tk);if(yData){var obj={};obj[tk]=Object.assign({},details||{},yData);setEnriched(function(prev){return Object.assign({},prev,obj);});}}catch(e){}setFetching(function(f){var n=Object.assign({},f);delete n[tk];return n;});},[]);
+var liveOne=useCallback(async function(tk){setFetching(function(f){var n=Object.assign({},f);n[tk]=true;return n;});try{var d=await fetchTicker(tk);if(d){var obj={};obj[tk]=d;setEnriched(function(prev){return Object.assign({},prev,obj);});}}catch(e){}setFetching(function(f){var n=Object.assign({},f);delete n[tk];return n;});},[]);
 var loadAll=useCallback(async function(){
 if(!validH.length)return;
 setLoading({fetch:true});setErr("");
 var tickers=Array.from(new Set(validH.map(function(x){return cT(x.ticker);})));
-setStatus("Fetching prices from Yahoo Finance...");
+setStatus("Loading from Yahoo Finance...");
 try{
-var yData=await fetchYahooBatch(tickers,function(done,total){setStatus("Prices: "+done+"/"+total+"...");});
-if(yData){
-setStatus("Loading sector & fundamentals...");
-var details=await enrichWithYahoo(tickers,function(done,total){setStatus("Details: "+done+"/"+total+"...");});
-var merged={};
-tickers.forEach(function(tk){
-var y=yData[tk]||{};var d=details[tk]||{};
-var isCr=CRTK.indexOf(tk)>-1;
-merged[tk]=Object.assign({},d,y);
-if(isCr){merged[tk].sector="Cryptocurrency";merged[tk].assetType="Cryptocurrency";}
-});
-setEnriched(function(prev){return Object.assign({},prev,merged);});
-setStatus("Done: "+Object.keys(yData).length+" tickers loaded");
+var data=await fetchAllTickers(tickers,function(done,total){setStatus("Loading: "+done+"/"+total+" tickers...");});
+if(data){
+setEnriched(function(prev){return Object.assign({},prev,data);});
+setStatus("Done: "+Object.keys(data).length+" tickers loaded");
 }else{
 setErr("Failed to load prices from Yahoo Finance");
 }

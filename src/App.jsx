@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 // Portfolio Insights - AI-powered portfolio dashboard
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid } from "recharts";
-var API="https://api.anthropic.com/v1/messages";
+var API="/api/ai";
 var DH=[{id:1,ticker:"GOOGL",shares:"18.46",avgCost:"126.15"},{id:2,ticker:"NVDA",shares:"30.44",avgCost:"46.20"},{id:3,ticker:"TSLA",shares:"12",avgCost:"200.00"},{id:4,ticker:"SPY",shares:"20",avgCost:"380.00"},{id:5,ticker:"NVDA-2",shares:"5",avgCost:"400.00"},{id:6,ticker:"JNJ",shares:"10",avgCost:"155.00"},{id:7,ticker:"BRK.B",shares:"6",avgCost:"310.00"},{id:8,ticker:"VTI",shares:"18",avgCost:"200.00"},{id:9,ticker:"AMZN",shares:"7",avgCost:"130.00"},{id:10,ticker:"GLD",shares:"14",avgCost:"170.00"},{id:11,ticker:"BTC",shares:"0.5",avgCost:"35000.00"},{id:12,ticker:"ETH",shares:"2",avgCost:"2000.00"},{id:13,ticker:"SOL",shares:"10",avgCost:"80.00"},{id:14,ticker:"QQQ",shares:"5",avgCost:"350.00"},{id:15,ticker:"VYM",shares:"8",avgCost:"105.00"}];
 function cT(t){return(function(x){var s=x.toUpperCase().trim(),d=s.lastIndexOf("-");if(d>0){var ok=true;for(var j=d+1;j<s.length;j++){var z=s.charCodeAt(j);if(z<48||z>57)ok=false;}if(ok&&d+1<s.length)s=s.slice(0,d);}return s;})(t||"");}
 function hap(){try{if(navigator.vibrate)navigator.vibrate([6,30,6]);}catch(e){}}

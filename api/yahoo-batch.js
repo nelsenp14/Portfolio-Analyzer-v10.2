@@ -56,7 +56,7 @@ module.exports = async function handler(req, res) {
           try {
             var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
               encodeURIComponent(sym) +
-              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics&crumb=" +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents&crumb=" +
               encodeURIComponent(crumb);
             var detailRes = await fetch(detailUrl, {
               headers: Object.assign({}, headers, { "Cookie": cookies })
@@ -81,6 +81,14 @@ module.exports = async function handler(req, res) {
               item.annualDividendPerShare = divRate;
               var mc = (detail.marketCap && detail.marketCap.raw) || 0;
               item.marketCap = mc >= 1e12 ? (mc/1e12).toFixed(1)+"T" : mc >= 1e9 ? (mc/1e9).toFixed(1)+"B" : mc > 0 ? (mc/1e6).toFixed(0)+"M" : "";
+              var cal = qr.calendarEvents || {};
+              var earn = cal.earnings || {};
+              if (earn.earningsDate && earn.earningsDate.length > 0) {
+                item.earningsDate = earn.earningsDate[0].fmt || "";
+              }
+              if (earn.earningsAverage && earn.earningsAverage.raw != null) {
+                item.epsEstimate = earn.earningsAverage.raw;
+              }
             }
           } catch(e2) {}
         }

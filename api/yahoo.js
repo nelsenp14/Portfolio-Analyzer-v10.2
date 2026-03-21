@@ -22,6 +22,7 @@ module.exports = async function handler(req, res) {
 
     var result = {
       currentPrice: meta.regularMarketPrice,
+      previousClose: meta.chartPreviousClose || meta.previousClose || 0,
       companyName: meta.shortName || meta.longName || symbol,
       sector: "",
       industry: "",

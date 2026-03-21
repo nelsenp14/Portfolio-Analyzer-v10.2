@@ -8,19 +8,32 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET");
 
   try {
-    var quote = await yahooFinance.quote(symbol);
+    var quote = await yahooFinance.quoteSummary(symbol, {
+      modules: ["summaryProfile", "summaryDetail", "defaultKeyStatistics"]
+    });
+
+    var profile = quote.summaryProfile || {};
+    var detail = quote.summaryDetail || {};
+    var stats = quote.defaultKeyStatistics || {};
+
     res.status(200).json({
-      chart: {
-        result: [{
-          meta: {
-            regularMarketPrice: quote.regularMarketPrice || 0,
-            shortName: quote.shortName || "",
-            longName: quote.longName || ""
-          }
-        }]
-      }
+      sector: profile.sector || "",
+      industry: profile.industry || "",
+      beta: stats.beta || 0,
+      pe: detail.trailingPE || 0,
+      dividendYield: detail.dividendYield ? detail.dividendYield * 100 : 0,
+      annualDividendPerShare: detail.dividendRate || 0,
+      marketCap: detail.marketCap ? (detail.marketCap >= 1e12 ? (detail.marketCap/1e12).toFixed(1)+"T" : detail.marketCap >= 1e9 ? (detail.marketCap/1e9).toFixed(1)+"B" : (detail.marketCap/1e6).toFixed(0)+"M") : ""
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(200).json({
+      sector: "",
+      industry: "",
+      beta: 0,
+      pe: 0,
+      dividendYield: 0,
+      annualDividendPerShare: 0,
+      marketCap: ""
+    });
   }
 };

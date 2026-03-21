@@ -6,11 +6,36 @@ module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET");
 
   try {
+    // Step 1: Get cookies from Yahoo
+    var cookieRes = await fetch("https://fc.yahoo.com", {
+      redirect: "manual",
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    var cookies = (cookieRes.headers.get("set-cookie") || "").split(",")
+      .map(function(c) { return c.split(";")[0].trim(); })
+      .filter(Boolean)
+      .join("; ");
+
+    // Step 2: Get crumb using cookies
+    var crumbRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Cookie": cookies
+      }
+    });
+    var crumb = await crumbRes.text();
+
+    // Step 3: Fetch quote summary with auth
     var url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
       encodeURIComponent(symbol) +
-      "?modules=summaryProfile,summaryDetail,defaultKeyStatistics";
+      "?modules=summaryProfile,summaryDetail,defaultKeyStatistics&crumb=" +
+      encodeURIComponent(crumb);
+
     var r = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" }
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Cookie": cookies
+      }
     });
     var data = await r.json();
     var result = data && data.quoteSummary && data.quoteSummary.result && data.quoteSummary.result[0];

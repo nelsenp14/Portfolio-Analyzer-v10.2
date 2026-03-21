@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 // Portfolio Insights - AI-powered portfolio dashboard
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid } from "recharts";
 var API="https://api.anthropic.com/v1/messages";
-var YAHOO_PROXY="https://corsproxy.io/?url=";
 var DH=[{id:1,ticker:"GOOGL",shares:"18.46",avgCost:"126.15"},{id:2,ticker:"NVDA",shares:"30.44",avgCost:"46.20"},{id:3,ticker:"TSLA",shares:"12",avgCost:"200.00"},{id:4,ticker:"SPY",shares:"20",avgCost:"380.00"},{id:5,ticker:"NVDA-2",shares:"5",avgCost:"400.00"},{id:6,ticker:"JNJ",shares:"10",avgCost:"155.00"},{id:7,ticker:"BRK.B",shares:"6",avgCost:"310.00"},{id:8,ticker:"VTI",shares:"18",avgCost:"200.00"},{id:9,ticker:"AMZN",shares:"7",avgCost:"130.00"},{id:10,ticker:"GLD",shares:"14",avgCost:"170.00"},{id:11,ticker:"BTC",shares:"0.5",avgCost:"35000.00"},{id:12,ticker:"ETH",shares:"2",avgCost:"2000.00"},{id:13,ticker:"SOL",shares:"10",avgCost:"80.00"},{id:14,ticker:"QQQ",shares:"5",avgCost:"350.00"},{id:15,ticker:"VYM",shares:"8",avgCost:"105.00"}];
 function cT(t){return(function(x){var s=x.toUpperCase().trim(),d=s.lastIndexOf("-");if(d>0){var ok=true;for(var j=d+1;j<s.length;j++){var z=s.charCodeAt(j);if(z<48||z>57)ok=false;}if(ok&&d+1<s.length)s=s.slice(0,d);}return s;})(t||"");}
 function hap(){try{if(navigator.vibrate)navigator.vibrate([6,30,6]);}catch(e){}}
@@ -12,22 +11,18 @@ function toYF(tk){if(CRTK.indexOf(tk)>-1)return tk+"-USD";if(tk==="BRK.B")return
 function fmtCap(v){if(!v)return"";if(v>=1e12)return(v/1e12).toFixed(1)+"T";if(v>=1e9)return(v/1e9).toFixed(1)+"B";return(v/1e6).toFixed(0)+"M";}
 async function fetchYahooQuote(tk){
 var sym=toYF(tk);
-var url="https://query2.finance.yahoo.com/v8/finance/chart/"+encodeURIComponent(sym)+"?range=5d&interval=1d&includePrePost=false";
-var attempts=[YAHOO_PROXY+encodeURIComponent(url),url];
-for(var i=0;i<attempts.length;i++){
+var url="/api/yahoo?symbol="+encodeURIComponent(sym);
 try{
-var r=await fetch(attempts[i],{signal:AbortSignal.timeout(8000)});
-if(!r.ok)continue;
+var r=await fetch(url,{signal:AbortSignal.timeout(10000)});
+if(!r.ok)return null;
 var d=await r.json();
 var res=d&&d.chart&&d.chart.result&&d.chart.result[0];
-if(!res||!res.meta)continue;
+if(!res||!res.meta)return null;
 var m=res.meta;
-if(!m.regularMarketPrice||m.regularMarketPrice<=0)continue;
+if(!m.regularMarketPrice||m.regularMarketPrice<=0)return null;
 var isCr=CRTK.indexOf(tk)>-1;
 return{currentPrice:m.regularMarketPrice,companyName:m.shortName||m.longName||sym,assetType:isCr?"Cryptocurrency":"Equity",sector:isCr?"Cryptocurrency":"",beta:0,dividendYield:0,annualDividendPerShare:0,pe:0,marketCap:""};
-}catch(e){continue;}
-}
-return null;
+}catch(e){return null;}
 }
 async function fetchYahooBatch(tickers,onProgress){
 var results={};var done=0;

@@ -56,7 +56,7 @@ module.exports = async function handler(req, res) {
           try {
             var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
               encodeURIComponent(sym) +
-              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents&crumb=" +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings&crumb=" +
               encodeURIComponent(crumb);
             var detailRes = await fetch(detailUrl, {
               headers: Object.assign({}, headers, { "Cookie": cookies })
@@ -102,6 +102,16 @@ module.exports = async function handler(req, res) {
               }
               if (detail.exDividendDate && detail.exDividendDate.fmt && !item.exDividendDate) {
                 item.exDividendDate = detail.exDividendDate.fmt;
+              }
+              // Historical EPS from earnings module
+              var earningsModule = qr.earnings || {};
+              var earningsChart = earningsModule.earningsChart || {};
+              var quarterly = earningsChart.quarterly || [];
+              if (quarterly.length > 0) {
+                var last = quarterly[quarterly.length - 1];
+                item.lastEpsActual = (last.actual && last.actual.raw != null) ? last.actual.raw : null;
+                item.lastEpsEstimate = (last.estimate && last.estimate.raw != null) ? last.estimate.raw : null;
+                item.lastEpsDate = last.date || "";
               }
             }
           } catch(e2) {}

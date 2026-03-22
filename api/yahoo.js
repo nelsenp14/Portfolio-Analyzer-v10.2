@@ -9,6 +9,29 @@ module.exports = async function handler(req, res) {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   };
 
+  // Chart mode: return historical price data
+  if (req.query.mode === "chart") {
+    var range = req.query.range || "1mo";
+    var validRanges = { "5d": "5m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1wk", "5y": "1wk" };
+    var interval = validRanges[range] || "1d";
+    try {
+      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval;
+      var cRes = await fetch(cUrl, { headers: headers });
+      var cData = await cRes.json();
+      var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
+      if (!cResult) return res.status(200).json({ error: "No data" });
+      var timestamps = cResult.timestamp || [];
+      var closes = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0] && cResult.indicators.quote[0].close) || [];
+      var points = [];
+      for (var ci = 0; ci < timestamps.length; ci++) {
+        if (closes[ci] != null) points.push({ t: timestamps[ci] * 1000, c: Math.round(closes[ci] * 100) / 100 });
+      }
+      return res.status(200).json({ symbol: symbol, range: range, points: points });
+    } catch (ce) {
+      return res.status(500).json({ error: ce.message });
+    }
+  }
+
   try {
     // Get price from chart endpoint (no auth needed)
     var chartUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?range=5d&interval=1d";

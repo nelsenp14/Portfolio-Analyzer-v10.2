@@ -56,7 +56,7 @@ module.exports = async function handler(req, res) {
           try {
             var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
               encodeURIComponent(sym) +
-              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings&crumb=" +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData&crumb=" +
               encodeURIComponent(crumb);
             var detailRes = await fetch(detailUrl, {
               headers: Object.assign({}, headers, { "Cookie": cookies })
@@ -113,6 +113,39 @@ module.exports = async function handler(req, res) {
                 item.lastEpsEstimate = (last.estimate && last.estimate.raw != null) ? last.estimate.raw : null;
                 item.lastEpsDate = last.date || "";
               }
+              // All quarterly EPS for bar chart
+              if (quarterly.length > 0) {
+                item.quarterlyEps = quarterly.map(function(q) {
+                  return { date: q.date || "", actual: (q.actual && q.actual.raw != null) ? q.actual.raw : null, estimate: (q.estimate && q.estimate.raw != null) ? q.estimate.raw : null };
+                });
+              }
+              // Quarterly revenue/earnings from financialsChart
+              var finChart = earningsModule.financialsChart || {};
+              var qRevEarn = finChart.quarterly || [];
+              if (qRevEarn.length > 0) {
+                item.quarterlyFinancials = qRevEarn.map(function(q) {
+                  return { date: q.date || "", revenue: (q.revenue && q.revenue.raw) || 0, earnings: (q.earnings && q.earnings.raw) || 0 };
+                });
+              }
+              // 52-week high/low
+              item.fiftyTwoWeekHigh = (detail.fiftyTwoWeekHigh && detail.fiftyTwoWeekHigh.raw) || 0;
+              item.fiftyTwoWeekLow = (detail.fiftyTwoWeekLow && detail.fiftyTwoWeekLow.raw) || 0;
+              // Forward PE
+              item.forwardPE = (stats.forwardPE && stats.forwardPE.raw) || (detail.forwardPE && detail.forwardPE.raw) || 0;
+              // Analyst recommendation
+              var recTrend = qr.recommendationTrend || {};
+              var recArr = recTrend.trend || [];
+              if (recArr.length > 0) {
+                var r0 = recArr[0];
+                item.analystBuy = (r0.strongBuy || 0) + (r0.buy || 0);
+                item.analystHold = r0.hold || 0;
+                item.analystSell = (r0.sell || 0) + (r0.strongSell || 0);
+              }
+              // Target price
+              var finData = qr.financialData || {};
+              item.targetMeanPrice = (finData.targetMeanPrice && finData.targetMeanPrice.raw) || 0;
+              item.analystCount = (finData.numberOfAnalystOpinions && finData.numberOfAnalystOpinions.raw) || 0;
+              item.recommendation = finData.recommendationKey || "";
             }
           } catch(e2) {}
         }

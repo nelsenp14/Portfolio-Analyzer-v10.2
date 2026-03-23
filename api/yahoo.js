@@ -13,100 +13,33 @@ module.exports = async function handler(req, res) {
   if (req.query.mode === "chart") {
     var range = req.query.range || "1mo";
     var isCryptoSym = symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 || symbol.indexOf("-GBP") > -1;
-
-    // Get auth cookies for full history access
-    var chartCookies = "", chartCrumb = "";
     try {
-      var ckRes = await fetch("https://fc.yahoo.com", { redirect: "manual", headers: headers });
-      var rawCk = ckRes.headers.getSetCookie ? ckRes.headers.getSetCookie() : [];
-      if (!rawCk.length) { var sc2 = ckRes.headers.get("set-cookie") || ""; rawCk = sc2.split(/,(?=[^ ])/); }
-      chartCookies = rawCk.map(function(c2) { return c2.split(";")[0].trim(); }).filter(Boolean).join("; ");
-      if (chartCookies) {
-        var crRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
-          headers: Object.assign({}, headers, { "Cookie": chartCookies })
-        });
-        chartCrumb = await crRes.text();
-        if (chartCrumb && chartCrumb.length > 50) chartCrumb = "";
+      // Simple approach: for crypto 3y/5y use max, for everything else use range directly
+      var useRange = range;
+      var useInterval = {"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d";
+      if (range === "max") {
+        useRange = "max";
+        useInterval = "1wk";
+      } else if (isCryptoSym && (range === "3y" || range === "5y")) {
+        useRange = "max";
+        useInterval = "1wk";
       }
-    } catch(e3) {}
-
-    var rangeDays = {"5d":5,"1mo":30,"3mo":90,"6mo":182,"1y":365,"3y":1095,"5y":1826};
-    var days = rangeDays[range] || 365;
-    var cryptoInterval = days <= 5 ? "15m" : days <= 30 ? "1h" : days <= 365 ? "1d" : "1wk";
-    var now = Math.floor(Date.now() / 1000);
-    var start = now - (days * 86400);
-
-    try {
-      var attempts = [];
-      // Attempt 1: authenticated query2 with period1/period2
-      if (chartCrumb && chartCookies) {
-        attempts.push({
-          url: "https://query2.finance.yahoo.com/v8/finance/chart/" +
-            encodeURIComponent(symbol) + "?period1=" + start + "&period2=" + now +
-            "&interval=" + (isCryptoSym ? cryptoInterval : ({"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d")) +
-            "&crumb=" + encodeURIComponent(chartCrumb),
-          headers: Object.assign({}, headers, { "Cookie": chartCookies })
-        });
-      }
-      // Attempt 2: unauthenticated query1 with period1/period2
-      attempts.push({
-        url: "https://query1.finance.yahoo.com/v8/finance/chart/" +
-          encodeURIComponent(symbol) + "?period1=" + (isCryptoSym ? start : "") +
-          "&period2=" + now + "&interval=" + (isCryptoSym ? cryptoInterval : ({"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d")),
-        headers: headers
-      });
-      // Attempt 3: range=max fallback
-      attempts.push({
-        url: "https://query1.finance.yahoo.com/v8/finance/chart/" +
-          encodeURIComponent(symbol) + "?range=max&interval=" + cryptoInterval,
-        headers: headers
-      });
-      // For non-crypto, simpler: just use range parameter
-      if (!isCryptoSym) {
-        var stdInterval = {"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d";
-        attempts = [{
-          url: "https://query1.finance.yahoo.com/v8/finance/chart/" +
-            encodeURIComponent(symbol) + "?range=" + range + "&interval=" + stdInterval,
-          headers: headers
-        }];
-      }
-
-      var cResult = null;
-      for (var ai = 0; ai < attempts.length; ai++) {
-        try {
-          var aRes = await fetch(attempts[ai].url, { headers: attempts[ai].headers });
-          var aData = await aRes.json();
-          var r2 = aData && aData.chart && aData.chart.result && aData.chart.result[0];
-          if (r2 && r2.timestamp && r2.timestamp.length > 3) {
-            cResult = r2;
-            break;
-          }
-        } catch(e4) {}
-      }
-
+      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+        encodeURIComponent(symbol) + "?range=" + useRange + "&interval=" + useInterval;
+      var cRes = await fetch(cUrl, { headers: headers });
+      var cData = await cRes.json();
+      var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
       if (!cResult) return res.status(200).json({ error: "No data" });
       var timestamps = cResult.timestamp || [];
       var quote = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0]) || {};
       var closes = quote.close || [];
-      var highs = quote.high || [];
-      var lows = quote.low || [];
       var volumes = quote.volume || [];
       var cmeta = cResult.meta || {};
       var curP = cmeta.regularMarketPrice || 0;
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
-        var px = closes[ci];
-        if (px != null && px > 0) {
-          points.push({ t: timestamps[ci] * 1000, c: px, v: volumes[ci] || 0 });
-        }
-      }
-      if (points.length < 3 && highs.length > 0) {
-        points = [];
-        for (var ci3 = 0; ci3 < timestamps.length; ci3++) {
-          var h = highs[ci3], l = lows[ci3];
-          if (h != null && l != null && h > 0 && l > 0)
-            points.push({ t: timestamps[ci3] * 1000, c: (h + l) / 2, v: volumes[ci3] || 0 });
-        }
+        if (closes[ci] != null && closes[ci] > 0)
+          points.push({ t: timestamps[ci] * 1000, c: closes[ci], v: volumes[ci] || 0 });
       }
       // Sanity check
       if (points.length > 0 && curP > 0) {
@@ -114,14 +47,15 @@ module.exports = async function handler(req, res) {
         var pctOff = Math.abs(lastC - curP) / curP;
         if (pctOff > 0.5) {
           var sf = curP / lastC;
-          for (var si = 0; si < points.length; si++)
-            points[si] = { t: points[si].t, c: points[si].c * sf, v: points[si].v };
+          points = points.map(function(pt) { return { t: pt.t, c: pt.c * sf, v: pt.v }; });
         }
       }
-      // Trim if we fetched max — only keep requested window
-      if (isCryptoSym && points.length > 0) {
-        var cutoff = (now - days * 86400) * 1000;
-        points = points.filter(function(pt) { return pt.t >= cutoff; });
+      // Trim max results to 3y/5y window
+      if (useRange === "max" && range !== "max" && points.length > 0) {
+        var cutDays = range === "3y" ? 1095 : 1826;
+        var cutoff = Date.now() - (cutDays * 86400000);
+        var trimmed = points.filter(function(pt) { return pt.t >= cutoff; });
+        if (trimmed.length > 3) points = trimmed;
       }
       // Downsample
       if (points.length > 500) {
@@ -131,6 +65,23 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ symbol: symbol, range: range, points: points, currentPrice: curP });
     } catch (ce) {
       return res.status(500).json({ error: ce.message });
+    }
+  }
+
+  // Market cap mode: get raw market cap from chart meta (no auth needed)
+  if (req.query.mode === "mcap") {
+    try {
+      var mcUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+        encodeURIComponent(symbol) + "?range=1d&interval=1d";
+      var mcRes = await fetch(mcUrl, { headers: headers });
+      var mcData = await mcRes.json();
+      var mcMeta = mcData && mcData.chart && mcData.chart.result && mcData.chart.result[0] && mcData.chart.result[0].meta;
+      // Try to get market cap from regularMarketPrice * sharesOutstanding (if available)
+      var price2 = mcMeta ? mcMeta.regularMarketPrice || 0 : 0;
+      // Return what we have — frontend will use batch data if available
+      return res.status(200).json({ symbol: symbol, price: price2 });
+    } catch(e5) {
+      return res.status(200).json({ symbol: symbol, price: 0 });
     }
   }
 

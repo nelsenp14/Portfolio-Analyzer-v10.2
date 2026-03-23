@@ -12,23 +12,31 @@ module.exports = async function handler(req, res) {
   // Chart mode: return historical price data
   if (req.query.mode === "chart") {
     var range = req.query.range || "1mo";
-    var validRanges = { "5d": "15m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1wk", "5y": "1wk" };
+    var isCryptoSym = symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 || symbol.indexOf("-GBP") > -1;
+    var validRanges = { "5d": "15m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1d", "5y": "1wk" };
     var interval = validRanges[range] || "1d";
     try {
-      // Use query2 (more reliable for crypto) with crumb if available
+      // For crypto: always fetch max with 1d interval for any range > 3mo, then trim
+      // For stocks: use requested range directly (Yahoo handles it fine)
+      var fetchRange = range;
+      var fetchInterval = interval;
+      if (isCryptoSym && ["3mo","6mo","1y","3y","5y"].indexOf(range) > -1) {
+        fetchRange = "max";
+        fetchInterval = "1d";
+      }
       var chartHost = "https://query2.finance.yahoo.com";
       var cUrl = chartHost + "/v8/finance/chart/" +
-        encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval;
+        encodeURIComponent(symbol) + "?range=" + fetchRange + "&interval=" + fetchInterval;
       var cRes = await fetch(cUrl, { headers: headers });
       var cData = await cRes.json();
       var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
-      // Fallback for 3y/5y: try max range
-      if (!cResult && (range === "3y" || range === "5y")) {
-        var fbUrl = chartHost + "/v8/finance/chart/" +
-          encodeURIComponent(symbol) + "?range=max&interval=1wk";
-        var fbRes = await fetch(fbUrl, { headers: headers });
-        var fbData = await fbRes.json();
-        cResult = fbData && fbData.chart && fbData.chart.result && fbData.chart.result[0];
+      // Fallback: try query1 if query2 fails
+      if (!cResult) {
+        var fb2Url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?range=" + fetchRange + "&interval=" + fetchInterval;
+        var fb2Res = await fetch(fb2Url, { headers: headers });
+        var fb2Data = await fb2Res.json();
+        cResult = fb2Data && fb2Data.chart && fb2Data.chart.result && fb2Data.chart.result[0];
       }
       if (!cResult) return res.status(200).json({ error: "No data" });
       var timestamps = cResult.timestamp || [];
@@ -69,11 +77,16 @@ module.exports = async function handler(req, res) {
           }
         }
       }
-      // Trim 3y/5y if we fetched max
-      if (points.length > 0 && (range === "3y" || range === "5y")) {
-        var cutMs = range === "3y" ? 3 * 365.25 * 86400000 : 5 * 365.25 * 86400000;
-        var cutoff = Date.now() - cutMs;
+      // Trim to requested range if we fetched max
+      var rangeMsMap = { "3mo": 90*86400000, "6mo": 182*86400000, "1y": 365.25*86400000, "3y": 3*365.25*86400000, "5y": 5*365.25*86400000 };
+      if (points.length > 0 && rangeMsMap[range] && fetchRange === "max") {
+        var cutoff = Date.now() - rangeMsMap[range];
         points = points.filter(function(pt) { return pt.t >= cutoff; });
+      }
+      // Downsample if too many points (max with 1d interval can be huge)
+      if (points.length > 500) {
+        var step = Math.ceil(points.length / 500);
+        points = points.filter(function(pt, idx) { return idx % step === 0 || idx === points.length - 1; });
       }
       // Return with currentPrice so frontend can double-check
       return res.status(200).json({ symbol: symbol, range: range, points: points, currentPrice: curP });

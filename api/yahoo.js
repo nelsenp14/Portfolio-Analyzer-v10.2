@@ -1,169 +1,184 @@
 module.exports = async function handler(req, res) {
-  var symbol = req.query.symbol;
-  if (!symbol) return res.status(400).json({ error: "Missing symbol" });
+  var symbols = req.query.symbols;
+  if (!symbols) return res.status(400).json({ error: "Missing symbols" });
 
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET");
+
+  var tickers = symbols.split(",").map(function(s) { return s.trim(); }).filter(Boolean);
+  if (!tickers.length) return res.status(400).json({ error: "No valid symbols" });
 
   var headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
   };
 
-  // Chart mode: return historical price data
-  if (req.query.mode === "chart") {
-    var range = req.query.range || "1mo";
-    var isCryptoSym = symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 || symbol.indexOf("-GBP") > -1;
-    try {
-      // Simple approach: for crypto 3y/5y use max, for everything else use range directly
-      var useRange = range;
-      var useInterval = {"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d";
-      if (range === "max") {
-        useRange = "max";
-        useInterval = "1wk";
-      } else if (isCryptoSym && (range === "3y" || range === "5y")) {
-        useRange = "max";
-        useInterval = "1wk";
-      }
-      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-        encodeURIComponent(symbol) + "?range=" + useRange + "&interval=" + useInterval;
-      var cRes = await fetch(cUrl, { headers: headers });
-      var cData = await cRes.json();
-      var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
-      if (!cResult) return res.status(200).json({ error: "No data" });
-      var timestamps = cResult.timestamp || [];
-      var quote = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0]) || {};
-      var closes = quote.close || [];
-      var volumes = quote.volume || [];
-      var cmeta = cResult.meta || {};
-      var curP = cmeta.regularMarketPrice || 0;
-      var points = [];
-      for (var ci = 0; ci < timestamps.length; ci++) {
-        if (closes[ci] != null && closes[ci] > 0)
-          points.push({ t: timestamps[ci] * 1000, c: closes[ci], v: volumes[ci] || 0 });
-      }
-      // Sanity check
-      if (points.length > 0 && curP > 0) {
-        var lastC = points[points.length - 1].c;
-        var pctOff = Math.abs(lastC - curP) / curP;
-        if (pctOff > 0.5) {
-          var sf = curP / lastC;
-          points = points.map(function(pt) { return { t: pt.t, c: pt.c * sf, v: pt.v }; });
-        }
-      }
-      // Trim max results to 3y/5y window
-      if (useRange === "max" && range !== "max" && points.length > 0) {
-        var cutDays = range === "3y" ? 1095 : 1826;
-        var cutoff = Date.now() - (cutDays * 86400000);
-        var trimmed = points.filter(function(pt) { return pt.t >= cutoff; });
-        if (trimmed.length > 3) points = trimmed;
-      }
-      // Downsample
-      if (points.length > 500) {
-        var step = Math.ceil(points.length / 500);
-        points = points.filter(function(pt, idx) { return idx % step === 0 || idx === points.length - 1; });
-      }
-      return res.status(200).json({ symbol: symbol, range: range, points: points, currentPrice: curP });
-    } catch (ce) {
-      return res.status(500).json({ error: ce.message });
-    }
-  }
+  var results = {};
 
-  // Market cap mode: get raw market cap from chart meta (no auth needed)
-  if (req.query.mode === "mcap") {
-    try {
-      var mcUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-        encodeURIComponent(symbol) + "?range=1d&interval=1d";
-      var mcRes = await fetch(mcUrl, { headers: headers });
-      var mcData = await mcRes.json();
-      var mcMeta = mcData && mcData.chart && mcData.chart.result && mcData.chart.result[0] && mcData.chart.result[0].meta;
-      // Try to get market cap from regularMarketPrice * sharesOutstanding (if available)
-      var price2 = mcMeta ? mcMeta.regularMarketPrice || 0 : 0;
-      // Return what we have — frontend will use batch data if available
-      return res.status(200).json({ symbol: symbol, price: price2 });
-    } catch(e5) {
-      return res.status(200).json({ symbol: symbol, price: 0 });
-    }
-  }
-
+  // Auth once
+  var cookies = "";
+  var crumb = "";
   try {
-    // Get price from chart endpoint (no auth needed)
-    var chartUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?range=5d&interval=1d";
-    var chartRes = await fetch(chartUrl, { headers: headers });
-    var chartData = await chartRes.json();
-    var meta = chartData && chartData.chart && chartData.chart.result && chartData.chart.result[0] && chartData.chart.result[0].meta;
-
-    if (!meta || !meta.regularMarketPrice) {
-      return res.status(200).json({ error: "No price data for " + symbol });
+    var cookieRes = await fetch("https://fc.yahoo.com", { redirect: "manual", headers: headers });
+    var rawCookies = cookieRes.headers.getSetCookie ? cookieRes.headers.getSetCookie() : [];
+    if (!rawCookies.length) {
+      var sc = cookieRes.headers.get("set-cookie") || "";
+      rawCookies = sc.split(/,(?=[^ ])/);
     }
+    cookies = rawCookies.map(function(c) { return c.split(";")[0].trim(); }).filter(Boolean).join("; ");
+    if (cookies) {
+      var crumbRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
+        headers: Object.assign({}, headers, { "Cookie": cookies })
+      });
+      crumb = await crumbRes.text();
+      if (crumb && crumb.length > 50) crumb = "";
+    }
+  } catch(e) {}
 
-    var result = {
-      currentPrice: meta.regularMarketPrice,
-      previousClose: meta.chartPreviousClose || meta.previousClose || 0,
-      companyName: meta.shortName || meta.longName || symbol,
-      volume: meta.regularMarketVolume || 0,
-      sector: "",
-      industry: "",
-      beta: 0,
-      pe: 0,
-      dividendYield: 0,
-      annualDividendPerShare: 0,
-      marketCap: ""
-    };
+  // Fetch all tickers in parallel (all at once)
+  var promises = tickers.map(function(sym) {
+    return (async function() {
+      try {
+        var chartUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(sym) + "?range=5d&interval=1d";
+        var chartRes = await fetch(chartUrl, { headers: headers });
+        var chartData = await chartRes.json();
+        var meta = chartData && chartData.chart && chartData.chart.result && chartData.chart.result[0] && chartData.chart.result[0].meta;
+        if (!meta || !meta.regularMarketPrice) return;
 
-    // Try to get details via crumb auth
-    try {
-      var cookieRes = await fetch("https://fc.yahoo.com", { redirect: "manual", headers: headers });
-      var rawCookies = cookieRes.headers.getSetCookie ? cookieRes.headers.getSetCookie() : [];
-      if (!rawCookies.length) {
-        var sc = cookieRes.headers.get("set-cookie") || "";
-        rawCookies = sc.split(/,(?=[^ ])/);
-      }
-      var cookies = rawCookies.map(function(c) { return c.split(";")[0].trim(); }).filter(Boolean).join("; ");
+        var item = {
+          currentPrice: meta.regularMarketPrice,
+          previousClose: meta.chartPreviousClose || meta.previousClose || 0,
+          companyName: meta.shortName || meta.longName || sym,
+          volume: meta.regularMarketVolume || 0,
+          sector: "", industry: "", beta: 0, pe: 0,
+          dividendYield: 0, annualDividendPerShare: 0, marketCap: ""
+        };
 
-      if (cookies) {
-        var crumbRes = await fetch("https://query2.finance.yahoo.com/v1/test/getcrumb", {
-          headers: Object.assign({}, headers, { "Cookie": cookies })
-        });
-        var crumb = await crumbRes.text();
-
-        if (crumb && crumb.length < 50) {
-          var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
-            encodeURIComponent(symbol) +
-            "?modules=summaryProfile,summaryDetail,defaultKeyStatistics&crumb=" +
-            encodeURIComponent(crumb);
-          var detailRes = await fetch(detailUrl, {
-            headers: Object.assign({}, headers, { "Cookie": cookies })
-          });
-          var detailData = await detailRes.json();
-          var qr = detailData && detailData.quoteSummary && detailData.quoteSummary.result && detailData.quoteSummary.result[0];
-
-          if (qr) {
-            var profile = qr.summaryProfile || {};
-            var detail = qr.summaryDetail || {};
-            var stats = qr.defaultKeyStatistics || {};
-            result.sector = profile.sector || "";
-            result.industry = profile.industry || "";
-            result.beta = (stats.beta && stats.beta.raw) || (detail.beta3Year && detail.beta3Year.raw) || 0;
-            result.pe = (detail.trailingPE && detail.trailingPE.raw) || 0;
-            var dy = (detail.dividendYield && detail.dividendYield.raw) ? detail.dividendYield.raw * 100 : 0;
-            if (!dy && detail.yield && detail.yield.raw) dy = detail.yield.raw * 100;
-            if (!dy && detail.trailingAnnualDividendYield && detail.trailingAnnualDividendYield.raw) dy = detail.trailingAnnualDividendYield.raw * 100;
-            if (!dy && stats.yield && stats.yield.raw) dy = stats.yield.raw * 100;
-            result.dividendYield = dy;
-            var divRate = (detail.dividendRate && detail.dividendRate.raw) || 0;
-            if (!divRate && detail.trailingAnnualDividendRate && detail.trailingAnnualDividendRate.raw) divRate = detail.trailingAnnualDividendRate.raw;
-            result.annualDividendPerShare = divRate;
-            var mc = (detail.marketCap && detail.marketCap.raw) || 0;
-            result.marketCap = mc >= 1e12 ? (mc/1e12).toFixed(1)+"T" : mc >= 1e9 ? (mc/1e9).toFixed(1)+"B" : mc > 0 ? (mc/1e6).toFixed(0)+"M" : "";
-          }
+        if (crumb && cookies) {
+          try {
+            var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
+              encodeURIComponent(sym) +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData,topHoldings,fundProfile&crumb=" +
+              encodeURIComponent(crumb);
+            var detailRes = await fetch(detailUrl, {
+              headers: Object.assign({}, headers, { "Cookie": cookies })
+            });
+            var detailData = await detailRes.json();
+            var qr = detailData && detailData.quoteSummary && detailData.quoteSummary.result && detailData.quoteSummary.result[0];
+            if (qr) {
+              var profile = qr.summaryProfile || {};
+              var detail = qr.summaryDetail || {};
+              var stats = qr.defaultKeyStatistics || {};
+              item.sector = profile.sector || "";
+              item.industry = profile.industry || "";
+              item.beta = (stats.beta && stats.beta.raw) || (detail.beta3Year && detail.beta3Year.raw) || 0;
+              item.pe = (detail.trailingPE && detail.trailingPE.raw) || 0;
+              var dy = (detail.dividendYield && detail.dividendYield.raw) ? detail.dividendYield.raw * 100 : 0;
+              if (!dy && detail.yield && detail.yield.raw) dy = detail.yield.raw * 100;
+              if (!dy && detail.trailingAnnualDividendYield && detail.trailingAnnualDividendYield.raw) dy = detail.trailingAnnualDividendYield.raw * 100;
+              if (!dy && stats.yield && stats.yield.raw) dy = stats.yield.raw * 100;
+              item.dividendYield = dy;
+              var divRate = (detail.dividendRate && detail.dividendRate.raw) || 0;
+              if (!divRate && detail.trailingAnnualDividendRate && detail.trailingAnnualDividendRate.raw) divRate = detail.trailingAnnualDividendRate.raw;
+              item.annualDividendPerShare = divRate;
+              
+              // Return raw lastDividendValue for frontend frequency detection
+              var lastDiv = (detail.lastDividendValue && detail.lastDividendValue.raw) || 
+                           (stats.lastDividendValue && stats.lastDividendValue.raw) || 0;
+              if (lastDiv > 0) item.lastDividendValue = lastDiv;
+              var mc = (detail.marketCap && detail.marketCap.raw) || 0;
+              item.marketCap = mc >= 1e12 ? (mc/1e12).toFixed(1)+"T" : mc >= 1e9 ? (mc/1e9).toFixed(1)+"B" : mc > 0 ? (mc/1e6).toFixed(0)+"M" : "";
+              var cal = qr.calendarEvents || {};
+              var earn = cal.earnings || {};
+              if (earn.earningsDate && earn.earningsDate.length > 0) {
+                item.earningsDate = earn.earningsDate[0].fmt || "";
+              }
+              if (earn.earningsAverage && earn.earningsAverage.raw != null) {
+                item.epsEstimate = earn.earningsAverage.raw;
+              }
+              if (cal.exDividendDate && cal.exDividendDate.fmt) {
+                item.exDividendDate = cal.exDividendDate.fmt;
+              }
+              if (cal.dividendDate && cal.dividendDate.fmt) {
+                item.dividendDate = cal.dividendDate.fmt;
+              }
+              if (detail.exDividendDate && detail.exDividendDate.fmt && !item.exDividendDate) {
+                item.exDividendDate = detail.exDividendDate.fmt;
+              }
+              // Historical EPS from earnings module
+              var earningsModule = qr.earnings || {};
+              var earningsChart = earningsModule.earningsChart || {};
+              var quarterly = earningsChart.quarterly || [];
+              if (quarterly.length > 0) {
+                var last = quarterly[quarterly.length - 1];
+                item.lastEpsActual = (last.actual && last.actual.raw != null) ? last.actual.raw : null;
+                item.lastEpsEstimate = (last.estimate && last.estimate.raw != null) ? last.estimate.raw : null;
+                item.lastEpsDate = last.date || "";
+              }
+              // All quarterly EPS for bar chart
+              if (quarterly.length > 0) {
+                item.quarterlyEps = quarterly.map(function(q) {
+                  return { date: q.date || "", actual: (q.actual && q.actual.raw != null) ? q.actual.raw : null, estimate: (q.estimate && q.estimate.raw != null) ? q.estimate.raw : null };
+                });
+              }
+              // Quarterly revenue/earnings from financialsChart
+              var finChart = earningsModule.financialsChart || {};
+              var qRevEarn = finChart.quarterly || [];
+              if (qRevEarn.length > 0) {
+                item.quarterlyFinancials = qRevEarn.map(function(q) {
+                  return { date: q.date || "", revenue: (q.revenue && q.revenue.raw) || 0, earnings: (q.earnings && q.earnings.raw) || 0 };
+                });
+              }
+              // 52-week high/low
+              item.fiftyTwoWeekHigh = (detail.fiftyTwoWeekHigh && detail.fiftyTwoWeekHigh.raw) || 0;
+              item.fiftyTwoWeekLow = (detail.fiftyTwoWeekLow && detail.fiftyTwoWeekLow.raw) || 0;
+              // Forward PE
+              item.forwardPE = (stats.forwardPE && stats.forwardPE.raw) || (detail.forwardPE && detail.forwardPE.raw) || 0;
+              // Analyst recommendation
+              var recTrend = qr.recommendationTrend || {};
+              var recArr = recTrend.trend || [];
+              if (recArr.length > 0) {
+                var r0 = recArr[0];
+                item.analystBuy = (r0.strongBuy || 0) + (r0.buy || 0);
+                item.analystHold = r0.hold || 0;
+                item.analystSell = (r0.sell || 0) + (r0.strongSell || 0);
+              }
+              // Target price
+              var finData = qr.financialData || {};
+              item.targetMeanPrice = (finData.targetMeanPrice && finData.targetMeanPrice.raw) || 0;
+              item.analystCount = (finData.numberOfAnalystOpinions && finData.numberOfAnalystOpinions.raw) || 0;
+              item.recommendation = finData.recommendationKey || "";
+              // ETF-specific fields
+              var fundProf = qr.fundProfile || {};
+              item.expenseRatio = (fundProf.feesExpensesInvestment && fundProf.feesExpensesInvestment.annualReportExpenseRatio && fundProf.feesExpensesInvestment.annualReportExpenseRatio.raw != null) ? fundProf.feesExpensesInvestment.annualReportExpenseRatio.raw : (stats.annualReportExpenseRatio && stats.annualReportExpenseRatio.raw != null) ? stats.annualReportExpenseRatio.raw : 0;
+              var ta = (stats.totalAssets && stats.totalAssets.raw) || (detail.totalAssets && detail.totalAssets.raw) || 0;
+              item.totalAssets = ta >= 1e12 ? (ta/1e12).toFixed(1)+"T" : ta >= 1e9 ? (ta/1e9).toFixed(1)+"B" : ta >= 1e6 ? (ta/1e6).toFixed(0)+"M" : "";
+              item.totalAssetsRaw = ta;
+              var topH = qr.topHoldings || {};
+              var hArr = topH.holdings || [];
+              item.holdingsCount = hArr.length;
+              if (hArr.length > 0 && hArr[0].symbol) {
+                item.topHolding = hArr[0].symbol;
+                item.topHoldingPct = (hArr[0].holdingPercent && hArr[0].holdingPercent.raw != null) ? (hArr[0].holdingPercent.raw * 100).toFixed(1) : "";
+              }
+              // Crypto-specific fields
+              item.circulatingSupply = (detail.circulatingSupply && detail.circulatingSupply.raw) || (stats.circulatingSupply && stats.circulatingSupply.raw) || 0;
+              item.allTimeHigh = item.fiftyTwoWeekHigh || 0;
+              var mcRaw = (detail.marketCap && detail.marketCap.raw) || 0;
+              item.marketCapRaw = mcRaw;
+            }
+          } catch(e2) {}
         }
-      }
-    } catch(e2) {
-      // Details failed, still return price
-    }
 
-    res.status(200).json(result);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+        results[sym] = item;
+      } catch(e) {}
+    })();
+  });
+  await Promise.all(promises);
+
+  res.status(200).json(results);
+};
+
+module.exports.config = {
+  api: { responseLimit: false },
+  maxDuration: 60
 };

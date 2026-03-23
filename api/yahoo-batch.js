@@ -48,6 +48,7 @@ module.exports = async function handler(req, res) {
           currentPrice: meta.regularMarketPrice,
           previousClose: meta.chartPreviousClose || meta.previousClose || 0,
           companyName: meta.shortName || meta.longName || sym,
+          volume: meta.regularMarketVolume || 0,
           sector: "", industry: "", beta: 0, pe: 0,
           dividendYield: 0, annualDividendPerShare: 0, marketCap: ""
         };
@@ -56,7 +57,7 @@ module.exports = async function handler(req, res) {
           try {
             var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
               encodeURIComponent(sym) +
-              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData&crumb=" +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData,topHoldings,fundProfile&crumb=" +
               encodeURIComponent(crumb);
             var detailRes = await fetch(detailUrl, {
               headers: Object.assign({}, headers, { "Cookie": cookies })
@@ -146,6 +147,20 @@ module.exports = async function handler(req, res) {
               item.targetMeanPrice = (finData.targetMeanPrice && finData.targetMeanPrice.raw) || 0;
               item.analystCount = (finData.numberOfAnalystOpinions && finData.numberOfAnalystOpinions.raw) || 0;
               item.recommendation = finData.recommendationKey || "";
+              // ETF-specific fields
+              var fundProf = qr.fundProfile || {};
+              item.expenseRatio = (fundProf.feesExpensesInvestment && fundProf.feesExpensesInvestment.annualReportExpenseRatio && fundProf.feesExpensesInvestment.annualReportExpenseRatio.raw != null) ? fundProf.feesExpensesInvestment.annualReportExpenseRatio.raw : (stats.annualReportExpenseRatio && stats.annualReportExpenseRatio.raw != null) ? stats.annualReportExpenseRatio.raw : 0;
+              var ta = (stats.totalAssets && stats.totalAssets.raw) || (detail.totalAssets && detail.totalAssets.raw) || 0;
+              item.totalAssets = ta >= 1e12 ? (ta/1e12).toFixed(1)+"T" : ta >= 1e9 ? (ta/1e9).toFixed(1)+"B" : ta >= 1e6 ? (ta/1e6).toFixed(0)+"M" : "";
+              item.totalAssetsRaw = ta;
+              var topH = qr.topHoldings || {};
+              item.holdingsCount = (topH.equityHoldings && Object.keys(topH.equityHoldings).length > 0) ? topH.holdings ? topH.holdings.length : 0 : 0;
+              if (!item.holdingsCount && topH.holdings) item.holdingsCount = topH.holdings.length;
+              // Crypto-specific fields
+              item.circulatingSupply = (detail.circulatingSupply && detail.circulatingSupply.raw) || (stats.circulatingSupply && stats.circulatingSupply.raw) || 0;
+              item.allTimeHigh = item.fiftyTwoWeekHigh || 0;
+              var mcRaw = (detail.marketCap && detail.marketCap.raw) || 0;
+              item.marketCapRaw = mcRaw;
             }
           } catch(e2) {}
         }

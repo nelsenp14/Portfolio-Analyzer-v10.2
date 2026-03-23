@@ -12,20 +12,31 @@ module.exports = async function handler(req, res) {
   // Chart mode: return historical price data
   if (req.query.mode === "chart") {
     var range = req.query.range || "1mo";
+    var period1 = req.query.period1 ? parseInt(req.query.period1) : 0;
+    var period2 = req.query.period2 ? parseInt(req.query.period2) : 0;
     var isCryptoSym = symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 || symbol.indexOf("-GBP") > -1;
     try {
-      // Simple approach: for crypto 3y/5y use max, for everything else use range directly
-      var useRange = range;
-      var useInterval = {"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d";
-      if (range === "max") {
-        useRange = "max";
-        useInterval = "1wk";
-      } else if (isCryptoSym && (range === "3y" || range === "5y")) {
-        useRange = "max";
-        useInterval = "1wk";
+      var cUrl;
+      if (period1 && period2) {
+        // Custom date range
+        var days = (period2 - period1) / 86400;
+        var custInterval = days <= 7 ? "15m" : days <= 60 ? "1h" : days <= 730 ? "1d" : "1wk";
+        cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?period1=" + period1 + "&period2=" + period2 + "&interval=" + custInterval;
+      } else {
+        // Standard range
+        var useRange = range;
+        var useInterval = {"5d":"15m","1mo":"1h","3mo":"1d","6mo":"1d","1y":"1d","3y":"1wk","5y":"1wk"}[range] || "1d";
+        if (range === "max") {
+          useRange = "max";
+          useInterval = "1wk";
+        } else if (isCryptoSym && (range === "3y" || range === "5y")) {
+          useRange = "max";
+          useInterval = "1wk";
+        }
+        cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?range=" + useRange + "&interval=" + useInterval;
       }
-      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-        encodeURIComponent(symbol) + "?range=" + useRange + "&interval=" + useInterval;
       var cRes = await fetch(cUrl, { headers: headers });
       var cData = await cRes.json();
       var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
@@ -51,7 +62,7 @@ module.exports = async function handler(req, res) {
         }
       }
       // Trim max results to 3y/5y window
-      if (useRange === "max" && range !== "max" && points.length > 0) {
+      if (typeof useRange !== "undefined" && useRange === "max" && range !== "max" && points.length > 0) {
         var cutDays = range === "3y" ? 1095 : 1826;
         var cutoff = Date.now() - (cutDays * 86400000);
         var trimmed = points.filter(function(pt) { return pt.t >= cutoff; });

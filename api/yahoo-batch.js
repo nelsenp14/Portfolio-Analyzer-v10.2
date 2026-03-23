@@ -154,8 +154,20 @@ module.exports = async function handler(req, res) {
               item.totalAssets = ta >= 1e12 ? (ta/1e12).toFixed(1)+"T" : ta >= 1e9 ? (ta/1e9).toFixed(1)+"B" : ta >= 1e6 ? (ta/1e6).toFixed(0)+"M" : "";
               item.totalAssetsRaw = ta;
               var topH = qr.topHoldings || {};
-              item.holdingsCount = (topH.equityHoldings && Object.keys(topH.equityHoldings).length > 0) ? topH.holdings ? topH.holdings.length : 0 : 0;
-              if (!item.holdingsCount && topH.holdings) item.holdingsCount = topH.holdings.length;
+              var hArr = topH.holdings || [];
+              item.holdingsCount = hArr.length;
+              if (hArr.length > 0) {
+                var topItem = hArr[0];
+                item.topHolding = topItem.symbol || topItem.holdingName || "";
+                item.topHoldingPct = (topItem.holdingPercent && topItem.holdingPercent.raw != null) ? (topItem.holdingPercent.raw * 100).toFixed(1) : "";
+              }
+              // Fallback: try to get total holdings count from fundProfile
+              if (!item.holdingsCount) {
+                var fph = qr.fundProfile || {};
+                if (fph.feesExpensesInvestment && fph.feesExpensesInvestment.totalNetAssets) {
+                  item.holdingsCount = 0; // we know it's an ETF but no count available
+                }
+              }
               // Crypto-specific fields
               item.circulatingSupply = (detail.circulatingSupply && detail.circulatingSupply.raw) || (stats.circulatingSupply && stats.circulatingSupply.raw) || 0;
               item.allTimeHigh = item.fiftyTwoWeekHigh || 0;

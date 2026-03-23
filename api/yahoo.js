@@ -22,9 +22,10 @@ module.exports = async function handler(req, res) {
       if (!cResult) return res.status(200).json({ error: "No data" });
       var timestamps = cResult.timestamp || [];
       var closes = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0] && cResult.indicators.quote[0].close) || [];
+      var volumes = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0] && cResult.indicators.quote[0].volume) || [];
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
-        if (closes[ci] != null) points.push({ t: timestamps[ci] * 1000, c: Math.round(closes[ci] * 100) / 100 });
+        if (closes[ci] != null) points.push({ t: timestamps[ci] * 1000, c: Math.round(closes[ci] * 100) / 100, v: volumes[ci] || 0 });
       }
       return res.status(200).json({ symbol: symbol, range: range, points: points });
     } catch (ce) {

@@ -28,10 +28,11 @@ return{currentPrice:d.currentPrice,previousClose:d.previousClose||0,companyName:
 async function fetchTicker(tk){
 var sym=toYF(tk);
 try{
-var r=await fetch("/api/yahoo?symbol="+encodeURIComponent(sym),{signal:AbortSignal.timeout(15000)});
+var r=await fetch("/api/yahoo-batch?tickers="+encodeURIComponent(sym),{signal:AbortSignal.timeout(20000)});
 if(!r.ok)return null;
-var d=await r.json();
-if(!d||d.error||!d.currentPrice||d.currentPrice<=0)return null;
+var data=await r.json();
+var d=data&&data[sym]?data[sym]:null;
+if(!d||!d.currentPrice||d.currentPrice<=0)return null;
 return classifyTicker(tk,d);
 }catch(e){return null;}
 }

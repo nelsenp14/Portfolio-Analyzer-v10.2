@@ -13,49 +13,43 @@ module.exports = async function handler(req, res) {
   if (req.query.mode === "chart") {
     var range = req.query.range || "1mo";
     var isCryptoSym = symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 || symbol.indexOf("-GBP") > -1;
-    var validRanges = { "5d": "15m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1d", "5y": "1wk" };
+    var validRanges = { "5d": "15m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1wk", "5y": "1wk" };
     var interval = validRanges[range] || "1d";
     try {
-      // For crypto: always fetch max with 1d interval for any range > 3mo, then trim
-      // For stocks: use requested range directly (Yahoo handles it fine)
-      var fetchRange = range;
-      var fetchInterval = interval;
-      var usePeriod = false;
-      if (isCryptoSym && ["3mo","6mo","1y","3y","5y"].indexOf(range) > -1) {
-        usePeriod = true;
-        fetchInterval = range === "5y" ? "1wk" : "1d";
-      }
-      var chartHost = "https://query2.finance.yahoo.com";
       var cUrl;
-      if (usePeriod) {
-        var rangeSec = {"3mo":90,"6mo":182,"1y":365,"3y":1095,"5y":1825};
-        var days = rangeSec[range] || 365;
-        var period2 = Math.floor(Date.now() / 1000);
-        var period1 = period2 - (days * 86400);
-        cUrl = chartHost + "/v8/finance/chart/" +
-          encodeURIComponent(symbol) + "?period1=" + period1 + "&period2=" + period2 + "&interval=" + fetchInterval;
+      if (isCryptoSym) {
+        // For crypto: use period1/period2 with query1 — most reliable for full history
+        var rangeDays = {"5d":5,"1mo":30,"3mo":90,"6mo":182,"1y":365,"3y":1095,"5y":1826};
+        var days = rangeDays[range] || 365;
+        var now = Math.floor(Date.now() / 1000);
+        var start = now - (days * 86400);
+        var cryptoInterval = days <= 5 ? "15m" : days <= 30 ? "1h" : days <= 365 ? "1d" : "1wk";
+        cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?period1=" + start + "&period2=" + now +
+          "&interval=" + cryptoInterval + "&includePrePost=false";
       } else {
-        cUrl = chartHost + "/v8/finance/chart/" +
-          encodeURIComponent(symbol) + "?range=" + fetchRange + "&interval=" + fetchInterval;
+        cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval;
       }
       var cRes = await fetch(cUrl, { headers: headers });
       var cData = await cRes.json();
       var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
-      // Fallback: try query1 if query2 fails
+      // Fallback: try query2 if query1 fails
       if (!cResult) {
-        var fb2Url;
-        if (usePeriod) {
-          fb2Url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-            encodeURIComponent(symbol) + "?period1=" + period1 + "&period2=" + period2 + "&interval=" + fetchInterval;
-        } else {
-          fb2Url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-            encodeURIComponent(symbol) + "?range=" + fetchRange + "&interval=" + fetchInterval;
-        }
-        var fb2Res = await fetch(fb2Url, { headers: headers });
+        var fb = cUrl.replace("query1", "query2");
+        var fbRes = await fetch(fb, { headers: headers });
+        var fbData = await fbRes.json();
+        cResult = fbData && fbData.chart && fbData.chart.result && fbData.chart.result[0];
+      }
+      // Fallback 2: for crypto try range=max
+      if (!cResult && isCryptoSym) {
+        var fb2 = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?range=max&interval=1wk";
+        var fb2Res = await fetch(fb2, { headers: headers });
         var fb2Data = await fb2Res.json();
         cResult = fb2Data && fb2Data.chart && fb2Data.chart.result && fb2Data.chart.result[0];
       }
-      if (!cResult) return res.status(200).json({ error: "No data" });
+      if (!cResult) return res.status(200).json({ error: "No data", debug: "all_fetches_failed" });
       var timestamps = cResult.timestamp || [];
       var quote = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0]) || {};
       var closes = quote.close || [];
@@ -64,7 +58,6 @@ module.exports = async function handler(req, res) {
       var volumes = quote.volume || [];
       var cmeta = cResult.meta || {};
       var curP = cmeta.regularMarketPrice || 0;
-      // Build points from close data
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
         var px = closes[ci];
@@ -72,7 +65,7 @@ module.exports = async function handler(req, res) {
           points.push({ t: timestamps[ci] * 1000, c: px, v: volumes[ci] || 0 });
         }
       }
-      // If close array seems empty/bad, try reconstructing from high/low average
+      // Fallback to high/low avg if close is empty
       if (points.length < 3 && highs.length > 0) {
         points = [];
         for (var ci3 = 0; ci3 < timestamps.length; ci3++) {
@@ -82,37 +75,30 @@ module.exports = async function handler(req, res) {
           }
         }
       }
-      // Sanity: if last point is way off from current price, scale proportionally
+      // Sanity check against known price
       if (points.length > 0 && curP > 0) {
         var lastC = points[points.length - 1].c;
         var pctOff = Math.abs(lastC - curP) / curP;
         if (pctOff > 0.5) {
-          // Scale all points to align with current price
-          var scaleFactor = curP / lastC;
+          var sf = curP / lastC;
           for (var si = 0; si < points.length; si++) {
-            points[si] = { t: points[si].t, c: points[si].c * scaleFactor, v: points[si].v };
+            points[si] = { t: points[si].t, c: points[si].c * sf, v: points[si].v };
           }
         }
       }
-      // Trim to requested range if we fetched max
-      var rangeMsMap = { "3mo": 90*86400000, "6mo": 182*86400000, "1y": 365.25*86400000, "3y": 3*365.25*86400000, "5y": 5*365.25*86400000 };
-      if (points.length > 0 && rangeMsMap[range] && (fetchRange === "max" || usePeriod)) {
-        var cutoff = Date.now() - rangeMsMap[range];
-        points = points.filter(function(pt) { return pt.t >= cutoff; });
-      }
-      // Downsample if too many points (max with 1d interval can be huge)
+      // Downsample if huge
       if (points.length > 500) {
         var step = Math.ceil(points.length / 500);
         points = points.filter(function(pt, idx) { return idx % step === 0 || idx === points.length - 1; });
       }
-      // Return with currentPrice so frontend can double-check
-      return res.status(200).json({ symbol: symbol, range: range, points: points, currentPrice: curP });
+      return res.status(200).json({
+        symbol: symbol, range: range, points: points,
+        currentPrice: curP, totalPoints: timestamps.length
+      });
     } catch (ce) {
       return res.status(500).json({ error: ce.message });
     }
   }
-
-
 
   try {
     // Get price from chart endpoint (no auth needed)

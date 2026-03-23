@@ -15,15 +15,17 @@ module.exports = async function handler(req, res) {
     var validRanges = { "5d": "15m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1wk", "5y": "1wk" };
     var interval = validRanges[range] || "1d";
     try {
-      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-        encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval +
-        "&includeAdjustedClose=true";
+      // Use query2 (more reliable for crypto) with crumb if available
+      var chartHost = "https://query2.finance.yahoo.com";
+      var cUrl = chartHost + "/v8/finance/chart/" +
+        encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval;
       var cRes = await fetch(cUrl, { headers: headers });
       var cData = await cRes.json();
       var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
+      // Fallback for 3y/5y: try max range
       if (!cResult && (range === "3y" || range === "5y")) {
-        var fbUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-          encodeURIComponent(symbol) + "?range=max&interval=1wk&includeAdjustedClose=true";
+        var fbUrl = chartHost + "/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?range=max&interval=1wk";
         var fbRes = await fetch(fbUrl, { headers: headers });
         var fbData = await fbRes.json();
         cResult = fbData && fbData.chart && fbData.chart.result && fbData.chart.result[0];
@@ -32,59 +34,54 @@ module.exports = async function handler(req, res) {
       var timestamps = cResult.timestamp || [];
       var quote = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0]) || {};
       var closes = quote.close || [];
+      var highs = quote.high || [];
+      var lows = quote.low || [];
       var volumes = quote.volume || [];
-      var adjArr = (cResult.indicators && cResult.indicators.adjclose &&
-        cResult.indicators.adjclose[0] && cResult.indicators.adjclose[0].adjclose) || [];
       var cmeta = cResult.meta || {};
       var curP = cmeta.regularMarketPrice || 0;
-      var isCrypto = (cmeta.instrumentType === "CRYPTOCURRENCY") ||
-        symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 ||
-        symbol.indexOf("-GBP") > -1 || (cmeta.exchangeName && cmeta.exchangeName.indexOf("Crypto") > -1);
-      // For crypto: always use raw close (no adj). For stocks: prefer adjclose
-      var priceArr = isCrypto ? closes : (adjArr.length === closes.length && adjArr.length > 0 ? adjArr : closes);
+      // Build points from close data
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
-        var px = priceArr[ci];
-        if (px != null && px > 0) points.push({ t: timestamps[ci] * 1000, c: px, v: volumes[ci] || 0 });
+        var px = closes[ci];
+        if (px != null && px > 0) {
+          points.push({ t: timestamps[ci] * 1000, c: px, v: volumes[ci] || 0 });
+        }
       }
-      // Sanity check: if data is way off from current price, try scaling or alt array
-      if (points.length > 0 && curP > 0) {
-        var lastP = points[points.length - 1].c;
-        var ratio = lastP / curP;
-        if (ratio < 0.2 || ratio > 5) {
-          // Try the other array first
-          var altArr2 = priceArr === closes ? adjArr : closes;
-          if (altArr2.length > 0) {
-            var altPoints = [];
-            for (var ci2 = 0; ci2 < timestamps.length; ci2++) {
-              if (altArr2[ci2] != null && altArr2[ci2] > 0)
-                altPoints.push({ t: timestamps[ci2] * 1000, c: altArr2[ci2], v: volumes[ci2] || 0 });
-            }
-            if (altPoints.length > 0) {
-              var altRatio = altPoints[altPoints.length - 1].c / curP;
-              if (Math.abs(altRatio - 1) < Math.abs(ratio - 1)) {
-                points = altPoints;
-                ratio = altRatio;
-              }
-            }
-          }
-          // If still off, scale all points proportionally to match current price
-          if (ratio < 0.2 || ratio > 5) {
-            var scale = curP / points[points.length - 1].c;
-            points = points.map(function(pt) { return { t: pt.t, c: pt.c * scale, v: pt.v }; });
+      // If close array seems empty/bad, try reconstructing from high/low average
+      if (points.length < 3 && highs.length > 0) {
+        points = [];
+        for (var ci3 = 0; ci3 < timestamps.length; ci3++) {
+          var h = highs[ci3], l = lows[ci3];
+          if (h != null && l != null && h > 0 && l > 0) {
+            points.push({ t: timestamps[ci3] * 1000, c: (h + l) / 2, v: volumes[ci3] || 0 });
           }
         }
       }
+      // Sanity: if last point is way off from current price, scale proportionally
+      if (points.length > 0 && curP > 0) {
+        var lastC = points[points.length - 1].c;
+        var pctOff = Math.abs(lastC - curP) / curP;
+        if (pctOff > 0.5) {
+          // Scale all points to align with current price
+          var scaleFactor = curP / lastC;
+          for (var si = 0; si < points.length; si++) {
+            points[si] = { t: points[si].t, c: points[si].c * scaleFactor, v: points[si].v };
+          }
+        }
+      }
+      // Trim 3y/5y if we fetched max
       if (points.length > 0 && (range === "3y" || range === "5y")) {
         var cutMs = range === "3y" ? 3 * 365.25 * 86400000 : 5 * 365.25 * 86400000;
         var cutoff = Date.now() - cutMs;
         points = points.filter(function(pt) { return pt.t >= cutoff; });
       }
-      return res.status(200).json({ symbol: symbol, range: range, points: points });
+      // Return with currentPrice so frontend can double-check
+      return res.status(200).json({ symbol: symbol, range: range, points: points, currentPrice: curP });
     } catch (ce) {
       return res.status(500).json({ error: ce.message });
     }
   }
+
 
 
   try {

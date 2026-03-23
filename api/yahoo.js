@@ -35,26 +35,43 @@ module.exports = async function handler(req, res) {
       var volumes = quote.volume || [];
       var adjArr = (cResult.indicators && cResult.indicators.adjclose &&
         cResult.indicators.adjclose[0] && cResult.indicators.adjclose[0].adjclose) || [];
-      var useAdj = adjArr.length === closes.length && adjArr.length > 0;
-      var priceArr = useAdj ? adjArr : closes;
       var cmeta = cResult.meta || {};
       var curP = cmeta.regularMarketPrice || 0;
+      var isCrypto = (cmeta.instrumentType === "CRYPTOCURRENCY") ||
+        symbol.indexOf("-USD") > -1 || symbol.indexOf("-EUR") > -1 ||
+        symbol.indexOf("-GBP") > -1 || (cmeta.exchangeName && cmeta.exchangeName.indexOf("Crypto") > -1);
+      // For crypto: always use raw close (no adj). For stocks: prefer adjclose
+      var priceArr = isCrypto ? closes : (adjArr.length === closes.length && adjArr.length > 0 ? adjArr : closes);
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
         var px = priceArr[ci];
         if (px != null && px > 0) points.push({ t: timestamps[ci] * 1000, c: px, v: volumes[ci] || 0 });
       }
+      // Sanity check: if data is way off from current price, try scaling or alt array
       if (points.length > 0 && curP > 0) {
         var lastP = points[points.length - 1].c;
         var ratio = lastP / curP;
         if (ratio < 0.2 || ratio > 5) {
-          var altArr = useAdj ? closes : adjArr;
-          if (altArr.length > 0) {
-            points = [];
+          // Try the other array first
+          var altArr2 = priceArr === closes ? adjArr : closes;
+          if (altArr2.length > 0) {
+            var altPoints = [];
             for (var ci2 = 0; ci2 < timestamps.length; ci2++) {
-              if (altArr[ci2] != null && altArr[ci2] > 0)
-                points.push({ t: timestamps[ci2] * 1000, c: altArr[ci2], v: volumes[ci2] || 0 });
+              if (altArr2[ci2] != null && altArr2[ci2] > 0)
+                altPoints.push({ t: timestamps[ci2] * 1000, c: altArr2[ci2], v: volumes[ci2] || 0 });
             }
+            if (altPoints.length > 0) {
+              var altRatio = altPoints[altPoints.length - 1].c / curP;
+              if (Math.abs(altRatio - 1) < Math.abs(ratio - 1)) {
+                points = altPoints;
+                ratio = altRatio;
+              }
+            }
+          }
+          // If still off, scale all points proportionally to match current price
+          if (ratio < 0.2 || ratio > 5) {
+            var scale = curP / points[points.length - 1].c;
+            points = points.map(function(pt) { return { t: pt.t, c: pt.c * scale, v: pt.v }; });
           }
         }
       }

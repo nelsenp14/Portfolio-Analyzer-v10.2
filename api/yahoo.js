@@ -25,7 +25,7 @@ module.exports = async function handler(req, res) {
       var volumes = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0] && cResult.indicators.quote[0].volume) || [];
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
-        if (closes[ci] != null) points.push({ t: timestamps[ci] * 1000, c: Math.round(closes[ci] * 100) / 100, v: volumes[ci] || 0 });
+        if (closes[ci] != null && closes[ci] > 0) points.push({ t: timestamps[ci] * 1000, c: closes[ci], v: volumes[ci] || 0 });
       }
       return res.status(200).json({ symbol: symbol, range: range, points: points });
     } catch (ce) {

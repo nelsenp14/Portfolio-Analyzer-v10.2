@@ -57,7 +57,7 @@ module.exports = async function handler(req, res) {
           try {
             var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
               encodeURIComponent(sym) +
-              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData,topHoldings,fundProfile,earningsHistory&crumb=" +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData,topHoldings,fundProfile,earningsHistory,quoteType&crumb=" +
               encodeURIComponent(crumb);
             var detailRes = await fetch(detailUrl, {
               headers: Object.assign({}, headers, { "Cookie": cookies })
@@ -68,6 +68,8 @@ module.exports = async function handler(req, res) {
               var profile = qr.summaryProfile || {};
               var detail = qr.summaryDetail || {};
               var stats = qr.defaultKeyStatistics || {};
+              var qt = qr.quoteType || {};
+              item.quoteType = qt.quoteType || "";
               item.sector = profile.sector || "";
               item.industry = profile.industry || "";
               item.beta = (stats.beta && stats.beta.raw) || (detail.beta3Year && detail.beta3Year.raw) || 0;

@@ -57,7 +57,7 @@ module.exports = async function handler(req, res) {
           try {
             var detailUrl = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/" +
               encodeURIComponent(sym) +
-              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData,topHoldings,fundProfile&crumb=" +
+              "?modules=summaryProfile,summaryDetail,defaultKeyStatistics,calendarEvents,earnings,recommendationTrend,financialData,topHoldings,fundProfile,earningsHistory&crumb=" +
               encodeURIComponent(crumb);
             var detailRes = await fetch(detailUrl, {
               headers: Object.assign({}, headers, { "Cookie": cookies })
@@ -122,6 +122,19 @@ module.exports = async function handler(req, res) {
               }
               // Quarterly revenue/earnings from financialsChart
               var finChart = earningsModule.financialsChart || {};
+              // Historical EPS from earningsHistory module (goes back 5+ years)
+              var epsHist = qr.earningsHistory || {};
+              var epsHistArr = epsHist.history || [];
+              if (epsHistArr.length > 0) {
+                item.epsHistory = epsHistArr.map(function(h) {
+                  return {
+                    date: (h.quarter && h.quarter.fmt) || "",
+                    actual: (h.epsActual && h.epsActual.raw != null) ? h.epsActual.raw : null,
+                    estimate: (h.epsEstimate && h.epsEstimate.raw != null) ? h.epsEstimate.raw : null,
+                    surprise: (h.surprisePercent && h.surprisePercent.raw != null) ? h.surprisePercent.raw : null
+                  };
+                });
+              }
               var qRevEarn = finChart.quarterly || [];
               if (qRevEarn.length > 0) {
                 item.quarterlyFinancials = qRevEarn.map(function(q) {

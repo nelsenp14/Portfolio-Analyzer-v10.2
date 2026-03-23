@@ -12,26 +12,63 @@ module.exports = async function handler(req, res) {
   // Chart mode: return historical price data
   if (req.query.mode === "chart") {
     var range = req.query.range || "1mo";
-    var validRanges = { "5d": "5m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1wk", "5y": "1wk" };
+    var validRanges = { "5d": "15m", "1mo": "1h", "3mo": "1d", "6mo": "1d", "1y": "1d", "3y": "1wk", "5y": "1wk" };
     var interval = validRanges[range] || "1d";
     try {
-      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval;
+      var cUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+        encodeURIComponent(symbol) + "?range=" + range + "&interval=" + interval +
+        "&includeAdjustedClose=true";
       var cRes = await fetch(cUrl, { headers: headers });
       var cData = await cRes.json();
       var cResult = cData && cData.chart && cData.chart.result && cData.chart.result[0];
+      if (!cResult && (range === "3y" || range === "5y")) {
+        var fbUrl = "https://query1.finance.yahoo.com/v8/finance/chart/" +
+          encodeURIComponent(symbol) + "?range=max&interval=1wk&includeAdjustedClose=true";
+        var fbRes = await fetch(fbUrl, { headers: headers });
+        var fbData = await fbRes.json();
+        cResult = fbData && fbData.chart && fbData.chart.result && fbData.chart.result[0];
+      }
       if (!cResult) return res.status(200).json({ error: "No data" });
       var timestamps = cResult.timestamp || [];
-      var closes = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0] && cResult.indicators.quote[0].close) || [];
-      var volumes = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0] && cResult.indicators.quote[0].volume) || [];
+      var quote = (cResult.indicators && cResult.indicators.quote && cResult.indicators.quote[0]) || {};
+      var closes = quote.close || [];
+      var volumes = quote.volume || [];
+      var adjArr = (cResult.indicators && cResult.indicators.adjclose &&
+        cResult.indicators.adjclose[0] && cResult.indicators.adjclose[0].adjclose) || [];
+      var useAdj = adjArr.length === closes.length && adjArr.length > 0;
+      var priceArr = useAdj ? adjArr : closes;
+      var cmeta = cResult.meta || {};
+      var curP = cmeta.regularMarketPrice || 0;
       var points = [];
       for (var ci = 0; ci < timestamps.length; ci++) {
-        if (closes[ci] != null && closes[ci] > 0) points.push({ t: timestamps[ci] * 1000, c: closes[ci], v: volumes[ci] || 0 });
+        var px = priceArr[ci];
+        if (px != null && px > 0) points.push({ t: timestamps[ci] * 1000, c: px, v: volumes[ci] || 0 });
+      }
+      if (points.length > 0 && curP > 0) {
+        var lastP = points[points.length - 1].c;
+        var ratio = lastP / curP;
+        if (ratio < 0.2 || ratio > 5) {
+          var altArr = useAdj ? closes : adjArr;
+          if (altArr.length > 0) {
+            points = [];
+            for (var ci2 = 0; ci2 < timestamps.length; ci2++) {
+              if (altArr[ci2] != null && altArr[ci2] > 0)
+                points.push({ t: timestamps[ci2] * 1000, c: altArr[ci2], v: volumes[ci2] || 0 });
+            }
+          }
+        }
+      }
+      if (points.length > 0 && (range === "3y" || range === "5y")) {
+        var cutMs = range === "3y" ? 3 * 365.25 * 86400000 : 5 * 365.25 * 86400000;
+        var cutoff = Date.now() - cutMs;
+        points = points.filter(function(pt) { return pt.t >= cutoff; });
       }
       return res.status(200).json({ symbol: symbol, range: range, points: points });
     } catch (ce) {
       return res.status(500).json({ error: ce.message });
     }
   }
+
 
   try {
     // Get price from chart endpoint (no auth needed)
